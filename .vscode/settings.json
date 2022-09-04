@@ -1,0 +1,11 @@
+{
+    "code-runner.clearPreviousOutput": true,
+    "code-runner.runInTerminal": true,
+    "jupyter.jupyterServerType": "local",
+    "editor.formatOnSave": true,
+    "code-runner.fileDirectoryAsCwd": true,
+    "python.formatting.provider": "black",
+    "python.formatting.blackArgs": [
+        "--line-length=150"
+    ]
+}
