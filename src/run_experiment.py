@@ -14,10 +14,21 @@ import mlflow
 MLFLOW_DIR = "../mlruns"
 
 ########################## work ##########################
-WORKFILE_NAME = "work.py"
-DEPENDENT_FILES = ["utils.py"]
-EXPERIMENT_NAME = "test"
+WORKFILE_NAME = "main.py"
+CONFIGFILE_NAME = "config.yaml"
+DEPENDENT_FILES = [
+    "utils.py",
+    "train.py",
+    "dataset.py",
+    "inference.py",
+    "loss.py",
+    "optimizer.py",
+    "tokenizer.py",
+    "model.py",
+]
+EXPERIMENT_NAME = "baseline"
 WORKFILE_TO_CLEAR = []
+OVERWRITE_PARAMS = [{}]
 ########################## work ##########################
 
 
@@ -75,7 +86,7 @@ def copy_files():
     # copy src -> exp
     run_paths = glob.glob(os.path.join(f"../src/{EXPERIMENT_NAME}", "run*"))
     run_number = len(run_paths)
-    dir_ = f"../src/{EXPERIMENT_NAME}/run{run_number}"
+    dir_ = f"../src/{EXPERIMENT_NAME}/run{str(run_number).zfill(3)}"
 
     os.makedirs(dir_, exist_ok=False)
     shutil.copy(f"../src/{WORKFILE_NAME}", f"{dir_}/work.py")
@@ -83,8 +94,11 @@ def copy_files():
     for dependent_file in DEPENDENT_FILES:
         shutil.copy(f"../src/{dependent_file}", f"{dir_}/{dependent_file}")
 
+    # copy config -> exp
+    shutil.copy(f"../config/{CONFIGFILE_NAME}", f"{dir_}/{CONFIGFILE_NAME}")
+
     # copy src -> work
-    shutil.copy(f"../src/{WORKFILE_NAME}", "work.py")
+    shutil.copy(f"../src/{WORKFILE_NAME}", "main.py")
 
     for dependent_file in DEPENDENT_FILES:
         shutil.copy(f"../src/{dependent_file}", dependent_file)
@@ -96,7 +110,7 @@ def copy_files():
 def save_results_main():
     results = joblib.load("results.pkl")
 
-    print(results.params)
+    print(results["params"])
 
     # identify experiment
     client = mlflow.tracking.MlflowClient(MLFLOW_DIR)
@@ -109,18 +123,16 @@ def save_results_main():
     run = client.create_run(experiment_id)
 
     # params
-    for key, value in flatten_dict(results.params).items():
+    for key, value in flatten_dict(results["params"]).items():
         client.log_param(run.info.run_id, key, value)
 
     # metric
-    for key, value in results.metrics.items():
+    for key, value in results["metrics"].items():
         client.log_metric(run.info.run_id, key, value)
 
     # artifacts
     for filename in glob.glob("./*"):
         client.log_artifact(run.info.run_id, filename)
-
-    return results
 
 
 def remove_work_files(paths):
@@ -129,18 +141,26 @@ def remove_work_files(paths):
             os.remove(path)
 
 
-if __name__ == "__main__":
-
+def main(overwrite_param):
     # prepare
     premain("/workspaces/feedback-prize-english-language-learning/work")
     copy_files()
 
     # call work.main
+    command = ["python -u main.py"]
+    for k, v in overwrite_param.items():
+        command.append(f"{k}={v}")
+    command = " ".join(command)
     print("=" * 25, "PROCESS", "=" * 25)
-    subprocess.run("python -u work.py", shell=True)
+    subprocess.run(command, shell=True)
     print("=" * 25, "PROCESS", "=" * 25)
 
     remove_work_files(WORKFILE_TO_CLEAR)
 
     # save results
     save_results_main()
+
+
+if __name__ == "__main__":
+    for overwrite_param in OVERWRITE_PARAMS:
+        main(overwrite_param)
