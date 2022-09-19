@@ -9,13 +9,13 @@ globals:
 
 tokenizer:
   path: ${model.encoder.path}
-  max_length: 1024
+  max_length: 512
   params: {}
 
 dataloader:
   steps_per_epoch: -1 # must be set in script
   train:
-    batch_size: 4
+    batch_size: 16
     shuffle: True
     drop_last: True
     pin_memory: True
@@ -41,17 +41,18 @@ trainer:
   strategy:
   gradient_clip_algorithm: norm
   gradient_clip_val:
-  accumulate_grad_batches: 4
+  accumulate_grad_batches: 1
   amp_backend: native
   amp_level:
-  val_check_interval: 0.2
   num_sanity_val_steps: 0
-  logger:
+  val_check_interval: 0.2
 
 predict_trainer:
   accelerator: ${trainer.accelerator}
   devices: ${trainer.devices}
-  logger:
+  # precision: ${trainer.precision}
+  # amp_backend: ${trainer.amp_backend}
+  # amp_level: ${trainer.amp_level}
 
 model:
   encoder:
@@ -86,7 +87,7 @@ optimizer:
   # base_optimizer_name: Adam
   lr:
     encoder: 1.0e-06
-    head: 5.0e-04
+    head: 1.0e-06
   weight_decay: 0.0
   params:
     {}

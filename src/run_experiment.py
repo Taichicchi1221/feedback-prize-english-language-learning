@@ -1,3 +1,4 @@
+from genericpath import isdir
 import os
 import subprocess
 import sys
@@ -7,6 +8,7 @@ import argparse
 import shutil
 import joblib
 
+from omegaconf import OmegaConf
 
 import mlflow
 
@@ -26,9 +28,8 @@ DEPENDENT_FILES = [
     "tokenizer.py",
     "model.py",
 ]
-EXPERIMENT_NAME = "baseline"
-WORKFILE_TO_CLEAR = []
-OVERWRITE_PARAMS = [{}]
+EXPERIMENT_NAME = "baseline_tuning"
+WORKFILE_TO_CLEAR = ["__pycache__", "main.log", "lightning_logs", ".hydra"]
 ########################## work ##########################
 
 
@@ -82,7 +83,7 @@ def premain(directory):
     sys.path.append(directory)
 
 
-def copy_files():
+def copy_files_exp():
     # copy src -> exp
     run_paths = glob.glob(os.path.join(f"../src/{EXPERIMENT_NAME}", "run*"))
     run_number = len(run_paths)
@@ -97,6 +98,8 @@ def copy_files():
     # copy config -> exp
     shutil.copy(f"../config/{CONFIGFILE_NAME}", f"{dir_}/{CONFIGFILE_NAME}")
 
+
+def copy_files_work():
     # copy src -> work
     shutil.copy(f"../src/{WORKFILE_NAME}", "main.py")
 
@@ -138,29 +141,33 @@ def save_results_main():
 def remove_work_files(paths):
     for path in paths:
         if os.path.exists(path):
-            os.remove(path)
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
 
 
-def main(overwrite_param):
+def main():
+    cfg = OmegaConf.load(os.path.join("../config", CONFIGFILE_NAME))
+
     # prepare
     premain("/workspaces/feedback-prize-english-language-learning/work")
-    copy_files()
+    copy_files_work()
+    if not cfg.globals.debug:
+        copy_files_exp()
 
     # call work.main
-    command = ["python -u main.py"]
-    for k, v in overwrite_param.items():
-        command.append(f"{k}={v}")
-    command = " ".join(command)
     print("=" * 25, "PROCESS", "=" * 25)
+    command = "python -u main.py"
     subprocess.run(command, shell=True)
     print("=" * 25, "PROCESS", "=" * 25)
 
     remove_work_files(WORKFILE_TO_CLEAR)
 
     # save results
-    save_results_main()
+    if not cfg.globals.debug:
+        save_results_main()
 
 
 if __name__ == "__main__":
-    for overwrite_param in OVERWRITE_PARAMS:
-        main(overwrite_param)
+    main()

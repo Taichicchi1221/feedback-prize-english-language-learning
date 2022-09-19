@@ -4,7 +4,6 @@ from sklearn.metrics import mean_squared_error
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torchmetrics
 
 # ====================================================
@@ -21,7 +20,7 @@ class MCRMSELoss(nn.Module):
         super().__init__()
 
     def forward(self, preds, target):
-        return torch.mean(torch.sqrt(torch.mean(F.mse_loss(preds, target, reduction="none"), dim=0)), dim=0)
+        return torch.mean(torch.sqrt(torch.mean(torch.square(preds - target), dim=0)))
 
 
 # ====================================================

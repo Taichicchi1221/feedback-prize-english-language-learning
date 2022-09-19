@@ -121,7 +121,3 @@ def main():
 
     # save results
     submission_df.to_csv("submission.csv", index=False)
-
-
-if __name__ == "__main__":
-    main()
