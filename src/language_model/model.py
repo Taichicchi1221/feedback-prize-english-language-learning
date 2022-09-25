@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from omegaconf import OmegaConf
+
 import pytorch_lightning as pl
 
 import transformers
@@ -223,6 +225,11 @@ class EvalModel(pl.LightningModule):
     ):
         super().__init__()
 
+        if encoder_cfg.params is None:
+            encoder_cfg.params = {}
+        if head_cfg.params is None:
+            head_cfg.params = {}
+
         # encoder
         if transformers_config is None:
             self.config = transformers.AutoConfig.from_pretrained(encoder_cfg.path)
@@ -296,10 +303,11 @@ class Model(EvalModel):
             self.optimizer_cfg.type,
             self.optimizer_cfg.params,
         )
+
         scheduler = get_scheduler(
             optimizer,
             self.scheduler_cfg.type,
-            self.scheduler_cfg.params,
+            OmegaConf.to_object(self.scheduler_cfg.params),
         )
         return {
             "optimizer": optimizer,

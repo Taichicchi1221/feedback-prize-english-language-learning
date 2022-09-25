@@ -52,7 +52,7 @@ import torchmetrics
 import pytorch_lightning as pl
 
 
-os.environ["TOKENIZERS_PARALLELISM"] = "true"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 tqdm.pandas()
 
 ##
@@ -62,7 +62,6 @@ from optimizer import get_optimizer, get_scheduler
 from tokenizer import get_tokenizer
 from dataset import Dataset, Collate
 from model import *
-
 
 # ====================================================
 # constants
@@ -106,20 +105,21 @@ def main(cfg):
         train_dataset = Dataset(
             train_df.query(f"fold != {fold}"),
             tokenizer=tokenizer,
-            max_length=cfg.tokenizer.max_length,
+            max_length=cfg.tokenizer.max_length.train,
             target_names=TARGET_NAMES,
         )
         valid_dataset = Dataset(
             train_df.query(f"fold == {fold}"),
             tokenizer=tokenizer,
-            max_length=cfg.tokenizer.max_length,
+            max_length=cfg.tokenizer.max_length.valid,
             target_names=TARGET_NAMES,
         )
 
         # dataloader
-        collate_fn = Collate(tokenizer, max_length=cfg.tokenizer.max_length)
-        train_dataloader = torch.utils.data.DataLoader(train_dataset, collate_fn=collate_fn, **cfg.dataloader.train)
-        valid_dataloader = torch.utils.data.DataLoader(valid_dataset, collate_fn=collate_fn, **cfg.dataloader.valid)
+        train_collate_fn = Collate(tokenizer, max_length=cfg.tokenizer.max_length.train)
+        valid_collate_fn = Collate(tokenizer, max_length=cfg.tokenizer.max_length.valid)
+        train_dataloader = torch.utils.data.DataLoader(train_dataset, collate_fn=train_collate_fn, **cfg.dataloader.train)
+        valid_dataloader = torch.utils.data.DataLoader(valid_dataset, collate_fn=valid_collate_fn, **cfg.dataloader.valid)
 
         model = Model(
             encoder_cfg=cfg.model.encoder,
@@ -145,7 +145,8 @@ def main(cfg):
             save_weights_only=True,
         )
 
-        cfg.dataloader.steps_per_epoch = (len(train_dataloader) + cfg.trainer.accumulate_grad_batches - 1) // cfg.trainer.accumulate_grad_batches
+        cfg.globals.steps_per_epoch = (len(train_dataloader) + cfg.trainer.accumulate_grad_batches - 1) // cfg.trainer.accumulate_grad_batches
+        cfg.globals.steps_training = cfg.globals.steps_per_epoch * cfg.globals.epochs
 
         trainer = pl.Trainer(**cfg.trainer, callbacks=[checkpoint_callback])
 
@@ -170,7 +171,7 @@ def main(cfg):
         plot_lr_scheduler(
             lr_history=model.history["lr"],
             filename=f"plots/lr_scheduler_fold{fold}",
-            steps_per_epoch=cfg.dataloader.steps_per_epoch,
+            steps_per_epoch=cfg.globals.steps_per_epoch,
             accumulate_grad_batches=cfg.trainer.accumulate_grad_batches,
         )
 

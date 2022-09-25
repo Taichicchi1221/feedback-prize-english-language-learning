@@ -1,4 +1,3 @@
-from turtle import forward
 import numpy as np
 from sklearn.metrics import mean_squared_error
 
@@ -11,17 +10,32 @@ import torchmetrics
 # loss
 # ====================================================
 def get_loss(loss_type, loss_params):
-    if loss_type == "MCRMSELoss":
+    if loss_params is None:
+        loss_params = {}
+
+    if loss_type in ("MCRMSELoss", "SmoothL1Loss"):
         return eval(loss_type)(**loss_params)
+
     return getattr(torch.nn, loss_type)(**loss_params)
 
 
 class MCRMSELoss(nn.Module):
+    EPS = 1.0e-09
+
     def __init__(self) -> None:
         super().__init__()
 
     def forward(self, preds, target):
-        return torch.mean(torch.sqrt(torch.mean(F.mse_loss(preds, target, reduction="none"), dim=0)), dim=0)
+        return torch.mean(torch.sqrt(torch.mean(F.mse_loss(preds, target, reduction="none"), dim=0) + self.EPS), dim=0)
+
+
+class SmoothL1Loss(nn.Module):
+    def __init__(self, beta=1.0) -> None:
+        super().__init__()
+        self.beta = beta
+
+    def forward(self, preds, target):
+        return torch.mean(torch.mean(F.smooth_l1_loss(preds, target, reduction="none"), dim=0), dim=0)
 
 
 # ====================================================
@@ -57,6 +71,9 @@ class MCRMSEMetric(torchmetrics.Metric):
 
 
 def get_metric(metric_type, metric_params):
+    if metric_params is None:
+        metric_params = {}
+
     if metric_type == "MCRMSEMetric":
         return eval(metric_type)(**metric_params)
     return getattr(torch.nn, metric_type)(**metric_params)

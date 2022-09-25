@@ -51,7 +51,7 @@ import torchmetrics
 import pytorch_lightning as pl
 
 
-os.environ["TOKENIZERS_PARALLELISM"] = "true"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 tqdm.pandas()
 
 ##
@@ -105,9 +105,9 @@ def main():
 
         predict_trainer = pl.Trainer(**cfg.predict_trainer)
 
-        test_dataset = Dataset(df=test_df, tokenizer=tokenizer, max_length=cfg.tokenizer.max_length, target_names=TARGET_NAMES)
-        collate_fn = Collate(tokenizer, max_length=cfg.tokenizer.max_length)
-        test_dataloader = torch.utils.data.DataLoader(test_dataset, collate_fn=collate_fn, **cfg.dataloader.test)
+        test_dataset = Dataset(df=test_df, tokenizer=tokenizer, max_length=cfg.tokenizer.max_length.test, target_names=TARGET_NAMES)
+        test_collate_fn = Collate(tokenizer, max_length=cfg.tokenizer.max_length.test)
+        test_dataloader = torch.utils.data.DataLoader(test_dataset, collate_fn=test_collate_fn, **cfg.dataloader.test)
 
         submission_prediction_df = pd.DataFrame(
             torch.cat(predict_trainer.predict(model=model, dataloaders=test_dataloader)).numpy(),

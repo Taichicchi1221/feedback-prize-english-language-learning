@@ -6,7 +6,7 @@ import train
 import inference
 
 
-@hydra.main(config_path="../config", config_name="config")
+@hydra.main(config_path=".", config_name="config", version_base="1.1")
 def main(cfg):
     train.main(cfg)
     inference.main()

@@ -5,29 +5,34 @@ hydra:
 globals:
   seed: 42
   n_fold: 5
+  epochs: 5
+  steps_per_epoch: -1 # must be set in script
+  steps_training: -1 # must be set in script
   debug: False
 
 tokenizer:
+  max_length:
+    train: 512
+    valid: 512
+    test: 512
   path: ${model.encoder.path}
-  max_length: 1024
-  params: {}
+  params:
 
 dataloader:
-  steps_per_epoch: -1 # must be set in script
   train:
-    batch_size: 4
+    batch_size: 16
     shuffle: True
     drop_last: True
     pin_memory: True
-    num_workers: 1
+    num_workers: 4
   valid:
-    batch_size: 32
+    batch_size: 16
     shuffle: False
     drop_last: False
     pin_memory: False
     num_workers: 0
   test:
-    batch_size: 32
+    batch_size: 16
     shuffle: False
     drop_last: False
     pin_memory: False
@@ -36,12 +41,12 @@ dataloader:
 trainer:
   accelerator: gpu
   devices: 1
-  precision: bf16
-  max_epochs: 5
+  precision: 16
+  max_epochs: ${globals.epochs}
   strategy:
   gradient_clip_algorithm: norm
   gradient_clip_val:
-  accumulate_grad_batches: 4
+  accumulate_grad_batches: 1
   amp_backend: native
   amp_level:
   val_check_interval: 0.2
@@ -55,7 +60,7 @@ predict_trainer:
 
 model:
   encoder:
-    path: "microsoft/deberta-v3-base"
+    path: microsoft/deberta-v3-base
     params:
       hidden_dropout: 0.0
       hidden_dropout_prob: 0.0
@@ -64,16 +69,16 @@ model:
   head:
     type: MeanPoolingHead
     params:
-      {}
-      # dropout_rate: 0.00 # SimpleHead, MultiSampleDropoutHead
-      # dropout_num: 5 # MultiSampleDropoutHead
+      # dropout_rate: 0.0 # SimpleHead, MultiSampleDropoutHead
+      # dropout_num: 10 # MultiSampleDropoutHead
       # hidden_features: 1024 # AttentionHead, MaskAddedAttentionHead
       # hidden_size: 256 # CNNHead
       # kernel_size: 8 # CNNHead
       # dropout: 0.0 # LSTMHead, GRUHead
+
 loss:
-  type: MCRMSELoss
-  params: {}
+  type: MCRMSELoss # [SmoothL1Loss, MCRMSELoss]
+  params:
 
 metric:
   type: MCRMSEMetric
@@ -82,21 +87,15 @@ metric:
     num_cols: 6
 
 optimizer:
-  type: AdamW # [SGD, Adam, AdamW, RAdam, Lamb, SAM]
-  # base_optimizer_name: Adam
+  type: AdamW # [SGD, Adam, AdamW, RAdam]
   lr:
     encoder: 1.0e-06
-    head: 5.0e-04
+    head: 1.0e-06
   weight_decay: 0.0
   params:
-    {}
     # momentum: 0.0
     # betas: [0.9, 0.999] # Lamb, RAdam
     # eps: 1.0e-07 # Lamb, RAdam
-    # adam: True # Lamb
-    # debias: False # Lamb
-    # rho: 0.05 # SAM
-    # adaptive: False # SAM
 
 scheduler:
   type: OneCycleLR # [ReduceLROnPlateau, CosineAnnealingLR, CosineAnnealingWarmRestarts, OneCycleLR]
@@ -106,14 +105,14 @@ scheduler:
     # factor: 0.1 # ReduceLROnPlateau
     # patience: 2 # ReduceLROnPlateau
     # eps: 1.0e-08 # ReduceLROnPlateau
-    # T_max: ${dataloader.steps_per_epoch} # CosineAnnealingLR
-    # T_0: ${dataloader.steps_per_epoch} # CosineAnnealingWarmRestarts
+    # T_max: ${globals.steps_per_epoch} # CosineAnnealingLR
+    # T_0: ${globals.steps_per_epoch} # CosineAnnealingWarmRestarts
     # T_mult: 2 # CosineAnnealingWarmRestarts
     # eta_min: 1.0e-12 # CosineAnnealingLR, CosineAnnealingWarmRestarts
-    max_lr: 2.0e-05 # OneCycleLR
+    max_lr: [2.0e-05, 2.0e-05, 2.0e-05] # ["encoder", "encoder_no_decay", "head"] # OneCycleLR
     pct_start: 0.1 # OneCycleLR
-    steps_per_epoch: ${dataloader.steps_per_epoch} # OneCycleLR
-    epochs: ${trainer.max_epochs} # OneCycleLR
+    steps_per_epoch: ${globals.steps_per_epoch} # OneCycleLR
+    epochs: ${globals.epochs} # OneCycleLR
     anneal_strategy: cos # OneCycleLR
     div_factor: 1.0e+02 # OneCycleLR
     final_div_factor: 1 # OneCycleLR

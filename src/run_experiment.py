@@ -15,9 +15,9 @@ import mlflow
 
 MLFLOW_DIR = "../mlruns"
 
-########################## work ##########################
+########################## language model ##########################
+SRC_DIR = "language_model"
 WORKFILE_NAME = "main.py"
-CONFIGFILE_NAME = "config.yaml"
 DEPENDENT_FILES = [
     "utils.py",
     "train.py",
@@ -28,9 +28,22 @@ DEPENDENT_FILES = [
     "tokenizer.py",
     "model.py",
 ]
+CONFIGFILE_NAME = "language_model_config.yaml"
 EXPERIMENT_NAME = "baseline_tuning"
 WORKFILE_TO_CLEAR = ["__pycache__", "main.log", "lightning_logs", ".hydra"]
-########################## work ##########################
+REPORT_RESULTS = True
+########################## language model ##########################
+
+
+########################## pretrain ##########################
+# SRC_DIR = "pretrain"
+# WORKFILE_NAME = "main.py"
+# DEPENDENT_FILES = ["pretrain.py"]
+# CONFIGFILE_NAME = "pretrain_config.yaml"
+# EXPERIMENT_NAME = "pretrain"
+# WORKFILE_TO_CLEAR = ["__pycache__", "main.log", ".hydra"]
+# REPORT_RESULTS = False
+########################## pretrain ##########################
 
 
 # ====================================================
@@ -85,26 +98,29 @@ def premain(directory):
 
 def copy_files_exp():
     # copy src -> exp
-    run_paths = glob.glob(os.path.join(f"../src/{EXPERIMENT_NAME}", "run*"))
+    run_paths = glob.glob(os.path.join(f"../src/experiments/{EXPERIMENT_NAME}", "run*"))
     run_number = len(run_paths)
-    dir_ = f"../src/{EXPERIMENT_NAME}/run{str(run_number).zfill(3)}"
+    dir_ = f"../src/experiments/{EXPERIMENT_NAME}/run{str(run_number).zfill(3)}"
 
     os.makedirs(dir_, exist_ok=False)
-    shutil.copy(f"../src/{WORKFILE_NAME}", f"{dir_}/work.py")
+    shutil.copy(WORKFILE_NAME, f"{dir_}/work.py")
 
     for dependent_file in DEPENDENT_FILES:
-        shutil.copy(f"../src/{dependent_file}", f"{dir_}/{dependent_file}")
+        shutil.copy(dependent_file, f"{dir_}/{dependent_file}")
 
     # copy config -> exp
-    shutil.copy(f"../config/{CONFIGFILE_NAME}", f"{dir_}/{CONFIGFILE_NAME}")
+    shutil.copy("config.yaml", f"{dir_}/config.yaml")
 
 
 def copy_files_work():
     # copy src -> work
-    shutil.copy(f"../src/{WORKFILE_NAME}", "main.py")
+    shutil.copy(f"../src/{SRC_DIR}/{WORKFILE_NAME}", "main.py")
 
     for dependent_file in DEPENDENT_FILES:
-        shutil.copy(f"../src/{dependent_file}", dependent_file)
+        shutil.copy(f"../src/{SRC_DIR}/{dependent_file}", dependent_file)
+
+    # copy config -> work
+    shutil.copy(f"../config/{CONFIGFILE_NAME}", "config.yaml")
 
 
 # ====================================================
@@ -153,19 +169,23 @@ def main():
     # prepare
     premain("/workspaces/feedback-prize-english-language-learning/work")
     copy_files_work()
-    if not cfg.globals.debug:
-        copy_files_exp()
 
     # call work.main
     print("=" * 25, "PROCESS", "=" * 25)
     command = "python -u main.py"
-    subprocess.run(command, shell=True)
+    ret = subprocess.run(command, shell=True)
     print("=" * 25, "PROCESS", "=" * 25)
+
+    if ret.returncode:
+        return
 
     remove_work_files(WORKFILE_TO_CLEAR)
 
     # save results
-    if not cfg.globals.debug:
+    if cfg.globals.debug:
+        return
+    if REPORT_RESULTS:
+        copy_files_exp()
         save_results_main()
 
 

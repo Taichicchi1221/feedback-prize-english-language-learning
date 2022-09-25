@@ -5,4 +5,4 @@ work/*
 kaggle/*
 datasets
 kaggle.json
-*/__pycache__
+__pycache__
