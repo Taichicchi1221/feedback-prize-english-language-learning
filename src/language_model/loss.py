@@ -41,14 +41,9 @@ class SmoothL1Loss(nn.Module):
 # ====================================================
 # metric
 # ====================================================
-def MCRMSE(y_trues, y_preds):
-    scores = []
-    idxes = y_trues.shape[1]
-    for i in range(idxes):
-        y_true = y_trues[:, i]
-        y_pred = y_preds[:, i]
-        score = mean_squared_error(y_true, y_pred, squared=False)  # RMSE
-        scores.append(score)
+def MCRMSE(y_true, y_preds):
+    assert y_true.shape == y_preds.shape
+    scores = np.sqrt(np.mean(np.square(y_true - y_preds), axis=0))
     mcrmse_score = np.mean(scores)
     return mcrmse_score, scores
 
@@ -62,12 +57,12 @@ class MCRMSEMetric(torchmetrics.Metric):
         self.add_state("length", default=torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum")
 
     def update(self, preds, target):
-        assert preds.shape == target.shape
-        self.sum_values += torch.sum((preds - target) ** 2, dim=0)
-        self.length += len(target)
+        assert preds.size() == target.size()
+        self.sum_values += torch.sum(torch.square(preds.float() - target.float()), dim=0)
+        self.length += target.size(0)
 
     def compute(self):
-        return torch.mean(torch.sqrt(self.sum_values / self.length))
+        return torch.mean(torch.sqrt(self.sum_values.float() / self.length.float()))
 
 
 def get_metric(metric_type, metric_params):
@@ -76,4 +71,4 @@ def get_metric(metric_type, metric_params):
 
     if metric_type == "MCRMSEMetric":
         return eval(metric_type)(**metric_params)
-    return getattr(torch.nn, metric_type)(**metric_params)
+    return getattr(torchmetrics, metric_type)(**metric_params)

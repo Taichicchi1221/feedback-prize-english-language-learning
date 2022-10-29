@@ -1,4 +1,3 @@
-from genericpath import isdir
 import os
 import subprocess
 import sys
@@ -7,6 +6,7 @@ import typing
 import argparse
 import shutil
 import joblib
+from itertools import product
 
 from omegaconf import OmegaConf
 
@@ -15,34 +15,43 @@ import mlflow
 
 MLFLOW_DIR = "../mlruns"
 
-########################## language model ##########################
+
+########################## source directory and experiment name ##########################
 SRC_DIR = "language_model"
-WORKFILE_NAME = "main.py"
-DEPENDENT_FILES = [
-    "utils.py",
-    "train.py",
-    "dataset.py",
-    "inference.py",
-    "loss.py",
-    "optimizer.py",
-    "tokenizer.py",
-    "model.py",
-]
-CONFIGFILE_NAME = "language_model_config.yaml"
 EXPERIMENT_NAME = "baseline_tuning"
-WORKFILE_TO_CLEAR = ["__pycache__", "main.log", "lightning_logs", ".hydra"]
-REPORT_RESULTS = True
+OVERWRITE_PARAMS = [None]
+
+
+# SRC_DIR = "pretrain"
+# EXPERIMENT_NAME = "pretrain"
+# OVERWRITE_PARAMS = [None]
+
+########################## language model ##########################
+if SRC_DIR == "language_model":
+    WORKFILE_NAME = "main.py"
+    DEPENDENT_FILES = [
+        "utils.py",
+        "train.py",
+        "dataset.py",
+        "inference.py",
+        "loss.py",
+        "optimizer.py",
+        "tokenizer.py",
+        "model.py",
+    ]
+    CONFIGFILE_NAME = "language_model_config.yaml"
+    WORKFILE_TO_CLEAR = ["__pycache__", "main.log", "lightning_logs", ".hydra"]
+    REPORT_RESULTS = True
 ########################## language model ##########################
 
 
 ########################## pretrain ##########################
-# SRC_DIR = "pretrain"
-# WORKFILE_NAME = "main.py"
-# DEPENDENT_FILES = ["pretrain.py"]
-# CONFIGFILE_NAME = "pretrain_config.yaml"
-# EXPERIMENT_NAME = "pretrain"
-# WORKFILE_TO_CLEAR = ["__pycache__", "main.log", ".hydra"]
-# REPORT_RESULTS = False
+if SRC_DIR == "pretrain":
+    WORKFILE_NAME = "main.py"
+    DEPENDENT_FILES = ["pretrain.py"]
+    CONFIGFILE_NAME = "pretrain_config.yaml"
+    WORKFILE_TO_CLEAR = ["__pycache__", "main.log", ".hydra"]
+    REPORT_RESULTS = False
 ########################## pretrain ##########################
 
 
@@ -96,22 +105,6 @@ def premain(directory):
     sys.path.append(directory)
 
 
-def copy_files_exp():
-    # copy src -> exp
-    run_paths = glob.glob(os.path.join(f"../src/experiments/{EXPERIMENT_NAME}", "run*"))
-    run_number = len(run_paths)
-    dir_ = f"../src/experiments/{EXPERIMENT_NAME}/run{str(run_number).zfill(3)}"
-
-    os.makedirs(dir_, exist_ok=False)
-    shutil.copy(WORKFILE_NAME, f"{dir_}/work.py")
-
-    for dependent_file in DEPENDENT_FILES:
-        shutil.copy(dependent_file, f"{dir_}/{dependent_file}")
-
-    # copy config -> exp
-    shutil.copy("config.yaml", f"{dir_}/config.yaml")
-
-
 def copy_files_work():
     # copy src -> work
     shutil.copy(f"../src/{SRC_DIR}/{WORKFILE_NAME}", "main.py")
@@ -163,7 +156,18 @@ def remove_work_files(paths):
                 os.remove(path)
 
 
-def main():
+def parse_params(params):
+    if params is None:
+        return ""
+
+    params_command = []
+    for k, v in params.items():
+        params_command.append(f"{k}='{v}'")
+
+    return " ".join(params_command)
+
+
+def main(overwrite_params: dict):
     cfg = OmegaConf.load(os.path.join("../config", CONFIGFILE_NAME))
 
     # prepare
@@ -172,7 +176,9 @@ def main():
 
     # call work.main
     print("=" * 25, "PROCESS", "=" * 25)
-    command = "python -u main.py"
+    overwrite_params_command = parse_params(overwrite_params)
+    command = "python -u main.py" + " " + overwrite_params_command
+    print("=" * 5, command)
     ret = subprocess.run(command, shell=True)
     print("=" * 25, "PROCESS", "=" * 25)
 
@@ -185,9 +191,9 @@ def main():
     if cfg.globals.debug:
         return
     if REPORT_RESULTS:
-        copy_files_exp()
         save_results_main()
 
 
 if __name__ == "__main__":
-    main()
+    for overwrite_params in OVERWRITE_PARAMS:
+        main(overwrite_params)

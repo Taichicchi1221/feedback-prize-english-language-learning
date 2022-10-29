@@ -61,6 +61,7 @@ from optimizer import get_optimizer, get_scheduler
 from tokenizer import get_tokenizer
 from dataset import Dataset, Collate
 from model import *
+from train import train_function, predict_function
 
 # ====================================================
 # constants
@@ -78,10 +79,14 @@ TARGET_NAMES = [
 # ====================================================
 def main():
     cfg = OmegaConf.load("config.yaml")
-    transformers_config = torch.load("transformers_config.pth")
     model_path_list = joblib.load("model_path_list.pkl")
+    cfg.config.path = "config_tokenizer"
+    cfg.tokenizer.path = "config_tokenizer"
 
     seed_everything(cfg.globals.seed, deterministic=True)
+
+    train_df = pd.read_csv("../input/feedback-prize-english-language-learning/train.csv")
+    prepare_fold(train_df, n_fold=cfg.globals.n_fold, target_names=TARGET_NAMES)
 
     test_df = pd.read_csv("../input/feedback-prize-english-language-learning/test.csv")
     for target_name in TARGET_NAMES:
@@ -89,35 +94,105 @@ def main():
 
     submission_df_list = []
     for fold, model_path in enumerate(model_path_list):
-        tokenizer = get_tokenizer(
-            tokenizer_path="tokenizer",
-            tokenizer_params=cfg.tokenizer.params,
-            transformers_config=transformers_config,
-        )
-
         print("#" * 30, f"model_path: {model_path}", "#" * 30)
+
+        train = train_df.copy()
+        test = test_df.copy()
+
+        tokenizer = get_tokenizer(tokenizer_path=cfg.tokenizer.path, tokenizer_params=cfg.tokenizer.params)
+        train_collate_function = Collate(tokenizer=tokenizer, max_length=cfg.tokenizer.max_length.train)
+        valid_collate_function = Collate(tokenizer=tokenizer, max_length=cfg.tokenizer.max_length.test)
+
         model = EvalModel.load_from_checkpoint(
             model_path,
+            config_cfg=cfg.config,
             encoder_cfg=cfg.model.encoder,
             head_cfg=cfg.model.head,
-            transformers_config=transformers_config,
+            pretrained=False,
         )
 
-        predict_trainer = pl.Trainer(**cfg.predict_trainer)
-
-        test_dataset = Dataset(df=test_df, tokenizer=tokenizer, max_length=cfg.tokenizer.max_length.test, target_names=TARGET_NAMES)
-        test_collate_fn = Collate(tokenizer, max_length=cfg.tokenizer.max_length.test)
-        test_dataloader = torch.utils.data.DataLoader(test_dataset, collate_fn=test_collate_fn, **cfg.dataloader.test)
-
-        submission_prediction_df = pd.DataFrame(
-            torch.cat(predict_trainer.predict(model=model, dataloaders=test_dataloader)).numpy(),
-            columns=TARGET_NAMES,
+        test_prediction = predict_function(
+            df=test,
+            tokenizer=tokenizer,
+            max_length=cfg.tokenizer.max_length.test,
+            collate_function=valid_collate_function,
+            dataloader_args=cfg.dataloader.test,
+            model=model,
+            trainer_args=cfg.trainer.predict,
         )
-        submission_prediction_df.insert(0, "text_id", test_dataset.text_ids)
+
+        submission_prediction_df = pd.concat(
+            [
+                pd.DataFrame({"text_id": test["text_id"], "full_text": test["full_text"]}),
+                pd.DataFrame({TARGET_NAMES[i]: test_prediction[:, i] for i in range(len(TARGET_NAMES))}),
+            ],
+            axis=1,
+        )
+
+        ### pseudo labeling
+        if cfg.globals.pseudo_label_epochs:
+            pseudo_labeling_train_df = pd.concat([train, submission_prediction_df], axis=0).reset_index(drop=True)
+            print("#" * 100)
+            print(pseudo_labeling_train_df)
+            print("#" * 100)
+
+            cfg.globals.steps_per_epoch = calc_steps_per_epoch(
+                len_dataset=len(pseudo_labeling_train_df),
+                batch_size=cfg.dataloader.train.batch_size,
+                accumulate_grad_batches=cfg.trainer.pseudo_label_train.accumulate_grad_batches,
+            )
+            cfg.globals.total_steps = cfg.globals.steps_per_epoch * cfg.globals.pseudo_label_epochs
+
+            model = Model.load_from_checkpoint(
+                model_path,
+                config_cfg=cfg.config,
+                encoder_cfg=cfg.model.encoder,
+                head_cfg=cfg.model.head,
+                loss_cfg=cfg.loss,
+                metric_cfg=cfg.metric,
+                optimizer_cfg=cfg.pseudo_label_optimizer,
+                scheduler_cfg=cfg.pseudo_label_scheduler,
+                pretrained=False,
+            )
+
+            train_function(
+                train_df=pseudo_labeling_train_df,
+                valid_df=None,
+                tokenizer=tokenizer,
+                train_max_length=cfg.tokenizer.max_length.train,
+                valid_max_length=None,
+                train_collate_function=train_collate_function,
+                valid_collate_function=None,
+                train_dataloader_args=cfg.dataloader.train,
+                valid_dataloader_args=None,
+                model=model,
+                trainer_args=cfg.trainer.pseudo_label_train,
+                checkpoint_name=None,
+            )
+
+            # prediction
+            test_prediction = predict_function(
+                df=test,
+                tokenizer=tokenizer,
+                max_length=cfg.tokenizer.max_length.test,
+                collate_function=valid_collate_function,
+                dataloader_args=cfg.dataloader.test,
+                model=model,
+                trainer_args=cfg.trainer.predict,
+            )
+
+            submission_prediction_df = pd.concat(
+                [
+                    pd.DataFrame({"text_id": test["text_id"], "text": test["full_text"]}),
+                    pd.DataFrame({TARGET_NAMES[i]: test_prediction[:, i] for i in range(len(TARGET_NAMES))}),
+                ],
+                axis=1,
+            )
+
         submission_df_list.append(submission_prediction_df)
 
     submission_df = pd.concat(submission_df_list)
-    submission_df = submission_df.groupby("text_id").agg("mean").sort_index().reset_index()
+    submission_df = submission_df.groupby("text_id")[TARGET_NAMES].agg("mean").sort_index().reset_index()
 
     # save results
     submission_df.to_csv("submission.csv", index=False)

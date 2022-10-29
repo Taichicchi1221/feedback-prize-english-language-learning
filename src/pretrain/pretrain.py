@@ -132,6 +132,24 @@ def main(cfg):
         cfg.model.path,
         config=transformers_config,
     )
+    if cfg.model.freeze_embeddings:
+        if "deberta" in cfg.model.path:
+            model.deberta.embeddings.requires_grad_(False)
+        elif "bert" in cfg.model.path:
+            model.bert.embeddings.requires_grad_(False)
+        elif "longformer" in cfg.model.path:
+            model.longformer.embeddings.requires_grad_(False)
+        elif "bigbird" in cfg.model.path:
+            model.bert.embeddings.requires_grad_(False)
+    if cfg.model.freeze_encoders:
+        if "deberta" in cfg.model.path:
+            model.deberta.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
+        elif "bert" in cfg.model.path:
+            model.bert.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
+        elif "longformer" in cfg.model.path:
+            model.longformer.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
+        elif "bigbird" in cfg.model.path:
+            model.bert.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
 
     # dataset
     train_dataset = Dataset(

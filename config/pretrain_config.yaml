@@ -13,6 +13,8 @@ tokenizer:
 
 model:
   path: "microsoft/deberta-v3-base"
+  freeze_embeddings: True
+  freeze_encoders: 6
   params:
     hidden_dropout: 0.1
     hidden_dropout_prob: 0.1
@@ -30,8 +32,8 @@ training:
   bf16: False
   num_train_epochs: 5
   gradient_accumulation_steps: 1
-  per_device_train_batch_size: 8
-  per_device_eval_batch_size: 8
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 4
   lr_scheduler_type: cosine
   evaluation_strategy: epoch
   logging_strategy: epoch

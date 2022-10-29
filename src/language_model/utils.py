@@ -148,6 +148,11 @@ class Trace:
         print(message, file=sys.stderr)
 
 
+def calc_steps_per_epoch(len_dataset, batch_size, accumulate_grad_batches):
+    steps_per_epoch = (len_dataset // batch_size + accumulate_grad_batches - 1) // accumulate_grad_batches + 1
+    return steps_per_epoch
+
+
 # ====================================================
 # plots
 # ====================================================

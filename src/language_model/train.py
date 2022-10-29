@@ -76,13 +76,116 @@ TARGET_NAMES = [
 ]
 
 
+def train_function(
+    train_df,
+    valid_df,
+    tokenizer,
+    train_max_length,
+    valid_max_length,
+    train_collate_function,
+    valid_collate_function,
+    train_dataloader_args,
+    valid_dataloader_args,
+    model,
+    trainer_args,
+    checkpoint_name,
+):
+    trace = Trace()
+
+    model.train()
+
+    # dataset
+    train_dataset = Dataset(
+        train_df,
+        tokenizer=tokenizer,
+        max_length=train_max_length,
+        target_names=TARGET_NAMES,
+    )
+    train_collate_function = Collate(tokenizer, max_length=train_max_length)
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset,
+        collate_fn=train_collate_function,
+        **train_dataloader_args,
+    )
+
+    if valid_df is not None:
+        valid_dataset = Dataset(
+            valid_df,
+            tokenizer=tokenizer,
+            max_length=valid_max_length,
+            target_names=TARGET_NAMES,
+        )
+        valid_collate_function = Collate(tokenizer, max_length=valid_max_length)
+        valid_dataloader = torch.utils.data.DataLoader(
+            valid_dataset,
+            collate_fn=valid_collate_function,
+            **valid_dataloader_args,
+        )
+    else:
+        valid_dataloader = None
+
+    with trace.timer(f"trainer.fit"):
+        if checkpoint_name:
+            checkpoint_callback = CheckPointCallback(
+                filename=checkpoint_name,
+                monitor="valid_metric",
+                mode="min",
+                dirpath=".",
+                auto_insert_metric_name=True,
+                save_top_k=1,
+                save_last=False,
+                save_weights_only=True,
+            )
+        else:
+            checkpoint_callback = None
+
+        trainer = pl.Trainer(
+            **trainer_args,
+            callbacks=checkpoint_callback,
+            logger=None,
+        )
+        trainer.fit(
+            model,
+            train_dataloaders=train_dataloader,
+            val_dataloaders=valid_dataloader,
+        )
+
+    if checkpoint_name:
+        best_model_path = checkpoint_callback.best_model_path
+        print(f"### best model path: {best_model_path}")
+        return best_model_path
+
+
+def predict_function(
+    df,
+    tokenizer,
+    max_length,
+    collate_function,
+    dataloader_args,
+    model,
+    trainer_args,
+):
+    dataset = Dataset(
+        df=df,
+        tokenizer=tokenizer,
+        max_length=max_length,
+        target_names=TARGET_NAMES,
+    )
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        collate_fn=collate_function,
+        **dataloader_args,
+    )
+    predict_trainer = pl.Trainer(**trainer_args)
+    model.eval()
+    return torch.cat(predict_trainer.predict(model=model, dataloaders=dataloader)).numpy()
+
+
 # ====================================================
 # main
 # ====================================================
 def main(cfg):
     seed_everything(cfg.globals.seed, deterministic=True)
-
-    trace = Trace()
 
     train_df = pd.read_csv("../input/feedback-prize-english-language-learning/train.csv")
     train_df.sort_values("text_id", inplace=True)
@@ -90,7 +193,11 @@ def main(cfg):
     if cfg.globals.debug:
         train_df = train_df.sample(300).reset_index(drop=True)
         cfg.globals.n_fold = 3
-        cfg.trainer.max_epochs = 2
+        cfg.globals.epochs = 2
+
+    # save config
+    transformers_config = transformers.AutoConfig.from_pretrained(cfg.model.encoder.path)
+    transformers_config.update(cfg.model.encoder.params)
 
     prepare_fold(train_df, n_fold=cfg.globals.n_fold, target_names=TARGET_NAMES)
     oof_df_list = []
@@ -98,98 +205,153 @@ def main(cfg):
 
     for fold in range(cfg.globals.n_fold):
         print("#" * 30, f"fold: {fold}", "#" * 30)
-        # tokenizer
-        tokenizer = get_tokenizer(cfg.tokenizer.path, cfg.tokenizer.params)
+        train = train_df.query(f"fold != {fold}").reset_index(drop=True)
+        valid = train_df.query(f"fold == {fold}").reset_index(drop=True)
 
-        # dataset
-        train_dataset = Dataset(
-            train_df.query(f"fold != {fold}"),
-            tokenizer=tokenizer,
-            max_length=cfg.tokenizer.max_length.train,
-            target_names=TARGET_NAMES,
-        )
-        valid_dataset = Dataset(
-            train_df.query(f"fold == {fold}"),
-            tokenizer=tokenizer,
-            max_length=cfg.tokenizer.max_length.valid,
-            target_names=TARGET_NAMES,
-        )
+        CHECKPOINT_NAME = f"fold{fold}_{os.path.basename(cfg.model.encoder.path)}_" "{epoch:02d}_{step:03d}_{valid_metric:.3f}"
 
-        # dataloader
-        train_collate_fn = Collate(tokenizer, max_length=cfg.tokenizer.max_length.train)
-        valid_collate_fn = Collate(tokenizer, max_length=cfg.tokenizer.max_length.valid)
-        train_dataloader = torch.utils.data.DataLoader(train_dataset, collate_fn=train_collate_fn, **cfg.dataloader.train)
-        valid_dataloader = torch.utils.data.DataLoader(valid_dataset, collate_fn=valid_collate_fn, **cfg.dataloader.valid)
+        tokenizer = get_tokenizer(tokenizer_path=cfg.tokenizer.path, tokenizer_params=cfg.tokenizer.params)
+        train_collate_function = Collate(tokenizer=tokenizer, max_length=cfg.tokenizer.max_length.train)
+        valid_collate_function = Collate(tokenizer=tokenizer, max_length=cfg.tokenizer.max_length.test)
 
         model = Model(
+            config_cfg=cfg.config,
             encoder_cfg=cfg.model.encoder,
             head_cfg=cfg.model.head,
             loss_cfg=cfg.loss,
             metric_cfg=cfg.metric,
             optimizer_cfg=cfg.optimizer,
             scheduler_cfg=cfg.scheduler,
+            awp_cfg=cfg.awp,
+            sift_cfg=cfg.sift,
+            pretrained=True,
         )
 
-        transformers_config = copy.deepcopy(model.config)
-
-        encoder_name = os.path.basename(cfg.model.encoder.path)
-        CHECKPOINT_NAME = f"fold{fold}_{encoder_name}_" "{epoch:02d}_{step:03d}_{valid_metric:.3f}"
-        checkpoint_callback = CheckPointCallback(
-            filename=CHECKPOINT_NAME,
-            monitor="valid_metric",
-            mode=cfg.metric.mode,
-            dirpath=".",
-            auto_insert_metric_name=True,
-            save_top_k=1,
-            save_last=False,
-            save_weights_only=True,
+        cfg.globals.steps_per_epoch = calc_steps_per_epoch(
+            len_dataset=len(train),
+            batch_size=cfg.dataloader.train.batch_size,
+            accumulate_grad_batches=cfg.trainer.train.accumulate_grad_batches,
         )
+        cfg.globals.total_steps = cfg.globals.steps_per_epoch * cfg.globals.epochs
 
-        cfg.globals.steps_per_epoch = (len(train_dataloader) + cfg.trainer.accumulate_grad_batches - 1) // cfg.trainer.accumulate_grad_batches
-        cfg.globals.steps_training = cfg.globals.steps_per_epoch * cfg.globals.epochs
-
-        trainer = pl.Trainer(**cfg.trainer, callbacks=[checkpoint_callback])
-
-        with trace.timer(f"trainer.fit fold{fold}"):
-            trainer.fit(
-                model,
-                train_dataloaders=train_dataloader,
-                val_dataloaders=valid_dataloader,
-            )
-
-        print(f"### best model path: {checkpoint_callback.best_model_path}")
-        model_path_list.append(os.path.basename(checkpoint_callback.best_model_path))
+        best_model_path = train_function(
+            train_df=train,
+            valid_df=valid,
+            tokenizer=tokenizer,
+            train_max_length=cfg.tokenizer.max_length.train,
+            valid_max_length=cfg.tokenizer.max_length.test,
+            train_collate_function=train_collate_function,
+            valid_collate_function=valid_collate_function,
+            train_dataloader_args=cfg.dataloader.train,
+            valid_dataloader_args=cfg.dataloader.test,
+            model=model,
+            trainer_args=cfg.trainer.train,
+            checkpoint_name=CHECKPOINT_NAME,
+        )
+        model_path_list.append(os.path.basename(best_model_path))
 
         # plots
         os.makedirs("plots", exist_ok=True)
         plot_training_curve(
             train_history=model.history["train_metric"],
             valid_history=model.history["valid_metric"],
-            filename=f"plots/training_curve_fold{fold}",
+            filename=f"plots/training_curve_fold{fold}.png",
         )
 
         plot_lr_scheduler(
             lr_history=model.history["lr"],
-            filename=f"plots/lr_scheduler_fold{fold}",
+            filename=f"plots/lr_scheduler_fold{fold}.png",
             steps_per_epoch=cfg.globals.steps_per_epoch,
-            accumulate_grad_batches=cfg.trainer.accumulate_grad_batches,
+            accumulate_grad_batches=cfg.trainer.train.accumulate_grad_batches,
         )
 
         # oof
         model = EvalModel.load_from_checkpoint(
-            checkpoint_callback.best_model_path,
+            best_model_path,
+            config_cfg=cfg.config,
             encoder_cfg=cfg.model.encoder,
             head_cfg=cfg.model.head,
+            pretrained=False,
         )
-        oof_prediction_df = pd.DataFrame(
-            torch.cat(trainer.predict(model=model, dataloaders=valid_dataloader)).numpy(),
-            columns=TARGET_NAMES,
+
+        oof_prediction = predict_function(
+            df=valid,
+            tokenizer=tokenizer,
+            max_length=cfg.tokenizer.max_length.test,
+            collate_function=valid_collate_function,
+            dataloader_args=cfg.dataloader.test,
+            model=model,
+            trainer_args=cfg.trainer.predict,
         )
-        oof_prediction_df.insert(0, "text_id", valid_dataset.text_ids)
+
+        oof_prediction_df = pd.concat(
+            [
+                pd.DataFrame({"text_id": valid["text_id"].to_numpy(), "full_text": valid["full_text"].to_numpy()}),
+                pd.DataFrame({TARGET_NAMES[i]: oof_prediction[:, i] for i in range(len(TARGET_NAMES))}),
+            ],
+            axis=1,
+        )
+
+        ### pseudo labeling
+        if cfg.globals.pseudo_label_epochs:
+            pseudo_labeling_train_df = pd.concat([train, oof_prediction_df], axis=0).reset_index(drop=True)
+
+            cfg.globals.steps_per_epoch = calc_steps_per_epoch(
+                len_dataset=len(pseudo_labeling_train_df),
+                batch_size=cfg.dataloader.train.batch_size,
+                accumulate_grad_batches=cfg.trainer.pseudo_label_train.accumulate_grad_batches,
+            )
+            cfg.globals.total_steps = cfg.globals.steps_per_epoch * cfg.globals.pseudo_label_epochs
+
+            model = Model.load_from_checkpoint(
+                best_model_path,
+                config_cfg=cfg.config,
+                encoder_cfg=cfg.model.encoder,
+                head_cfg=cfg.model.head,
+                loss_cfg=cfg.loss,
+                metric_cfg=cfg.metric,
+                optimizer_cfg=cfg.pseudo_label_optimizer,
+                scheduler_cfg=cfg.pseudo_label_scheduler,
+                pretrained=False,
+            )
+
+            train_function(
+                train_df=pseudo_labeling_train_df,
+                valid_df=None,
+                tokenizer=tokenizer,
+                train_max_length=cfg.tokenizer.max_length.train,
+                valid_max_length=None,
+                train_collate_function=train_collate_function,
+                valid_collate_function=None,
+                train_dataloader_args=cfg.dataloader.train,
+                valid_dataloader_args=None,
+                model=model,
+                trainer_args=cfg.trainer.pseudo_label_train,
+                checkpoint_name=None,
+            )
+
+            # oof
+            oof_prediction = predict_function(
+                df=valid,
+                tokenizer=tokenizer,
+                max_length=cfg.tokenizer.max_length.test,
+                collate_function=valid_collate_function,
+                dataloader_args=cfg.dataloader.test,
+                model=model,
+                trainer_args=cfg.trainer.predict,
+            )
+            oof_prediction_df = pd.concat(
+                [
+                    pd.DataFrame({"text_id": valid["text_id"].to_numpy(), "full_text": valid["full_text"].to_numpy()}),
+                    pd.DataFrame({TARGET_NAMES[i]: oof_prediction[:, i] for i in range(len(TARGET_NAMES))}),
+                ],
+                axis=1,
+            )
+
         oof_df_list.append(oof_prediction_df)
 
         oof_prediction_df.sort_values("text_id", inplace=True)
-        val_df = train_df.query(f"fold == {fold}").sort_values("text_id")
+        val_df = train_df.query(f"fold == {fold}").sort_values("text_id").reset_index(drop=True)
         score, detail_score = MCRMSE(val_df[TARGET_NAMES].to_numpy(), oof_prediction_df[TARGET_NAMES].to_numpy())
         oof_score_result = {"oof_score": score}
         for i, target_name in enumerate(TARGET_NAMES):
@@ -198,12 +360,11 @@ def main(cfg):
         print(oof_score_result)
         print("#" * 30, f"oof score of fold{fold}", "#" * 30)
 
-        del train_dataset, valid_dataset, train_dataloader, valid_dataloader, trainer, model
         gc.collect()
         torch.cuda.empty_cache()
         pl.utilities.memory.garbage_collection_cuda()
 
-    oof_df = pd.concat(oof_df_list)
+    oof_df = pd.concat(oof_df_list, axis=0)
     oof_df.sort_values("text_id", inplace=True)
     valid_score, valid_detail_score = MCRMSE(train_df[TARGET_NAMES].to_numpy(), oof_df[TARGET_NAMES].to_numpy())
     valid_score_result = {"valid_score": valid_score}
@@ -231,13 +392,13 @@ def main(cfg):
 
     # save results
     OmegaConf.save(cfg, "config.yaml")
-    oof_df.to_csv("oof.csv", index=False)
+    oof_df[["text_id"] + TARGET_NAMES].to_csv("oof.csv", index=False)
     joblib.dump(model_path_list, "model_path_list.pkl")
-    torch.save(transformers_config, "transformers_config.pth")
-    tokenizer.save_pretrained("tokenizer")
+    transformers_config.save_pretrained("config_tokenizer")
+    tokenizer.save_pretrained("config_tokenizer")
 
     results = {
-        "params": cfg,
+        "params": OmegaConf.to_container(cfg),
         "metrics": valid_score_result,
     }
     joblib.dump(results, "results.pkl")
