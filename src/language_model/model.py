@@ -358,7 +358,6 @@ class Model(EvalModel):
         if head_cfg.init:
             self._init_head_weights()
 
-        self.automatic_optimization = False
         self.optimizer_cfg = optimizer_cfg
         self.scheduler_cfg = scheduler_cfg
 
@@ -496,33 +495,18 @@ class Model(EvalModel):
                     module.weight.data.fill_(1.0)
 
     def training_step(self, batch, batch_idx):
-        optimizer = self.optimizers()
-        scheduler = self.lr_schedulers()
-
         y = batch["label"]
         y_hat = self(batch)
         loss = self.criterion(y_hat, y)
 
         self.train_metric(y_hat.detach(), y.detach())
-        self.history["lr"].append(optimizer.param_groups[0]["lr"])
+        self.history["lr"].append(self.optimizers(False).param_groups[0]["lr"])
 
         if hasattr(self, "awp"):
             self.awp.attack_backward(self, batch, self.trainer.current_epoch)
 
         if hasattr(self, "sift"):
             loss = loss + self.sift.loss(y, logits_fn=lambda model, batch: model(batch), batch=batch)
-
-        self.manual_backward(loss)
-
-        if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
-            optimizer.step()
-            optimizer.zero_grad()
-
-            if self.scheduler_cfg.interval == "step":
-                scheduler.step()
-
-            elif self.scheduler_cfg.interval == "epoch" and self.trainer.is_last_batch:
-                scheduler.step()
 
         return loss
 

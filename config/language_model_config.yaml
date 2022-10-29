@@ -9,7 +9,7 @@ globals:
   pseudo_label_epochs: 0
   steps_per_epoch: -1 # must be set in script
   total_steps: -1 # must be set in script
-  debug: true
+  debug: False
 
 tokenizer:
   max_length:
@@ -20,7 +20,7 @@ tokenizer:
 
 dataloader:
   train:
-    batch_size: 8
+    batch_size: 16
     shuffle: True
     drop_last: True
     pin_memory: True
@@ -147,11 +147,11 @@ pseudo_label_scheduler:
   params: null
 
 awp:
-  apply: True
+  apply: False
   params:
     adv_param: "weight"
-    adv_lr: 1
-    adv_eps: 0.2
+    adv_lr: 1.0
+    adv_eps: 0.001
     start_epoch: 0
     adv_step: 1
 

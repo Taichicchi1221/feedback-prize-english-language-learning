@@ -75,12 +75,16 @@ class AWP:
 
         self._save(model)
         for i in range(self.adv_step):
-            y = batch["label"]
+            with torch.cuda.amp.autocast(model.trainer.use_amp):
+                y_hat = model(batch)
+                loss = model.criterion(y_hat, batch["label"])
             self._attack_step(model)
-            y_hat = model(batch)
-            loss = model.criterion(y_hat, y)
             optimizer.zero_grad()
-            model.manual_backward(loss)
+
+            if model.trainer.scaler is not None:
+                model.trainer.scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
         self._restore(model)
 
