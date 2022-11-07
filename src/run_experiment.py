@@ -18,32 +18,11 @@ MLFLOW_DIR = "../mlruns"
 
 ########################## source directory and experiment name ##########################
 SRC_DIR = "language_model"
-EXPERIMENT_NAME = "deberta-v3-base_preprocess"
+EXPERIMENT_NAME = "deberta-v3-base_custom_loss"
 OVERWRITE_PARAMS = [
-    {
-        "preprocessor.method": "convert_paragraph_split_to_sep",
-    },
+    {"loss.params.alpha": 1.0},
+    {"loss.params.alpha": 0.5},
 ]
-
-# OVERWRITE_PARAMS = [
-#     {
-#         "globals.use_folds": "null",
-#         "model.encoder.path": "microsoft/deberta-v3-base",
-#         "tokenizer.max_length.train": 512,
-#         "tokenizer.max_length.test": 512,
-#         "dataloader.train.batch_size": 8,
-#         "dataloader.test.batch_size": 8,
-#         "trainer.train.accumulate_grad_batches": 2,
-#         "optimizer.lr.encoder": lr,
-#         "optimizer.lr.head": lr,
-#         "optimizer.lr_decay_rate": dec,
-#         "model.encoder.num_freeze_layers": 12,
-#     }
-#     for lr, dec in product(
-#         [4.0e-05, 8.0e-05, 16.0e-05],
-#         [0.25, 0.5],
-#     )
-# ]
 
 
 # SRC_DIR = "pretrain"

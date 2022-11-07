@@ -12,179 +12,108 @@ from optimizer import get_optimizer, get_scheduler, AdversarialLearner, hook_sif
 
 
 # ====================================================
-# heads
+# pooling
 # ====================================================
-class SimpleHead(nn.Module):
-    def __init__(
-        self,
-        in_features,
-        out_features,
-        dropout_rate,
-    ):
+class CLSPooling(nn.Module):
+    def __init__(self, in_features) -> None:
         super().__init__()
         self.layer_norm = nn.LayerNorm(in_features)
-        self.dropout = nn.Dropout(dropout_rate)
-        self.linear = nn.Linear(in_features=in_features, out_features=out_features)
+        self.out_size = in_features
 
     def forward(self, last_hidden_state, hidden_states, attention_mask):
-        x = self.layer_norm(last_hidden_state[:, 0, :])
-        x = self.dropout(x)
-        output = self.linear(x)
-        return output
+        return self.layer_norm(last_hidden_state[:, 0, :])
 
 
-class MultiSampleDropoutHead(nn.Module):
-    def __init__(
-        self,
-        in_features,
-        out_features,
-        dropout_num,
-        dropout_rate,
-    ):
+class CLSConcatPooling(nn.Module):
+    def __init__(self, in_features, num_hidden_layers) -> None:
+        super().__init__()
+        self.num_hidden_layers = num_hidden_layers
+        self.layer_norm = nn.LayerNorm(in_features * num_hidden_layers)
+        self.out_size = in_features * num_hidden_layers
+
+    def forward(self, last_hidden_state, hidden_states, attention_mask):
+        x = torch.cat([hidden_states[-(i + 1)][:, 0, :] for i in range(self.num_hidden_layers)], dim=1)
+        x = self.layer_norm(x)
+        return x
+
+
+class MeanPooling(nn.Module):
+    def __init__(self, in_features) -> None:
         super().__init__()
         self.layer_norm = nn.LayerNorm(in_features)
-        self.dropouts = nn.ModuleList([nn.Dropout(dropout_rate) for _ in range(dropout_num)])
-        self.linears = nn.ModuleList([nn.Linear(in_features, out_features) for _ in range(dropout_num)])
+        self.out_size = in_features
 
     def forward(self, last_hidden_state, hidden_states, attention_mask):
-        x = self.layer_norm(last_hidden_state[:, 0, :])
-        output = torch.stack([regressor(dropout(x)) for regressor, dropout in zip(self.linears, self.dropouts)]).mean(axis=0)
-        return output
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
+        sum_mask = input_mask_expanded.sum(1)
+        sum_mask = torch.clamp(sum_mask, min=1e-9)
+        mean_embeddings = sum_embeddings / sum_mask
+        norm_mean_embeddings = self.layer_norm(mean_embeddings)
+        return norm_mean_embeddings
 
 
-class AttentionHead(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features):
-        super(AttentionHead, self).__init__()
-        self.W = nn.Linear(in_features, hidden_features)
-        self.V = nn.Linear(hidden_features, out_features)
-
-    def forward(self, last_hidden_state, hidden_states, attention_mask):
-        attention_scores = self.V(torch.tanh(self.W(last_hidden_state)))
-        attention_scores = torch.softmax(attention_scores, dim=1)
-        attentive_x = attention_scores * last_hidden_state
-        attentive_x = attentive_x.sum(axis=1)
-        return attentive_x
-
-
-class MaskAddedAttentionHead(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features):
-        super(MaskAddedAttentionHead, self).__init__()
-        self.W = nn.Linear(in_features, hidden_features)
-        self.V = nn.Linear(hidden_features, out_features)
-
-    def forward(self, last_hidden_state, hidden_states, attention_mask):
-        attention_scores = self.V(torch.tanh(self.W(last_hidden_state)))
-        attention_scores = attention_scores + attention_mask
-        attention_scores = torch.softmax(attention_scores, dim=1)
-        attentive_x = attention_scores * last_hidden_state
-        attentive_x = attentive_x.sum(axis=1)
-        return attentive_x
-
-
-class AttentionPoolHead(nn.Module):
-    def __init__(self, in_features, out_features):
+class MaxPooling(nn.Module):
+    def __init__(self, in_features) -> None:
         super().__init__()
+        self.layer_norm = nn.LayerNorm(in_features)
+        self.out_size = in_features
 
+    def forward(self, last_hidden_state, hidden_states, attention_mask):
+        max_embeddings, _ = torch.max(last_hidden_state, 1)
+        norm_max_embeddings = self.layer_norm(max_embeddings)
+        return norm_max_embeddings
+
+
+class MeanMaxConcatPooling(nn.Module):
+    def __init__(self, in_features) -> None:
+        super().__init__()
+        self.layer_norm_mean = nn.LayerNorm(in_features)
+        self.layer_norm_max = nn.LayerNorm(in_features)
+        self.out_size = in_features * 2
+
+    def forward(self, last_hidden_state, hidden_states, attention_mask):
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
+        sum_mask = input_mask_expanded.sum(1)
+        sum_mask = torch.clamp(sum_mask, min=1e-9)
+        mean_embeddings = sum_embeddings / sum_mask
+        norm_mean_embeddings = self.layer_norm_mean(mean_embeddings)
+
+        max_embeddings, _ = torch.max(last_hidden_state, 1)
+        norm_max_embeddings = self.layer_norm_max(max_embeddings)
+        norm_mean_max_embeddings = torch.cat(
+            (
+                norm_mean_embeddings,
+                norm_max_embeddings,
+            ),
+            1,
+        )
+
+        return norm_mean_max_embeddings
+
+
+class AttentionPooling(nn.Module):
+    def __init__(self, in_features) -> None:
+        super().__init__()
         self.attention = nn.Sequential(
             nn.Linear(in_features, in_features),
             nn.LayerNorm(in_features),
             nn.GELU(),
             nn.Linear(in_features, 1),
         )
-        self.linear = nn.Linear(in_features, out_features)
+        self.out_size = in_features
 
     def forward(self, last_hidden_state, hidden_states, attention_mask):
         w = self.attention(last_hidden_state).float()
         w[attention_mask == 0] = float("-inf")
         w = torch.softmax(w, 1)
-        x = torch.sum(w * last_hidden_state, dim=1)
-        output = self.linear(x)
+        output = torch.sum(w * last_hidden_state, dim=1)
         return output
 
 
-class MeanPoolingHead(nn.Module):
-    def __init__(self, in_features, out_features):
-        super().__init__()
-        self.layer_norm = nn.LayerNorm(in_features)
-        self.linear = nn.Linear(in_features, out_features)
-
-    def forward(self, last_hidden_state, hidden_states, attention_mask):
-        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
-        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
-        sum_mask = input_mask_expanded.sum(1)
-        sum_mask = torch.clamp(sum_mask, min=1e-9)
-        mean_embeddings = sum_embeddings / sum_mask
-        norm_mean_embeddings = self.layer_norm(mean_embeddings)
-        logits = self.linear(norm_mean_embeddings).squeeze(-1)
-
-        return logits
-
-
-class MeanPoolingMultiSampleDropoutHead(nn.Module):
-    def __init__(
-        self,
-        in_features,
-        out_features,
-        dropout_num,
-        dropout_rate,
-    ):
-        super().__init__()
-        self.layer_norm = nn.LayerNorm(in_features)
-        self.linear = nn.Linear(in_features, out_features)
-        self.dropouts = nn.ModuleList([nn.Dropout(dropout_rate) for _ in range(dropout_num)])
-        self.linears = nn.ModuleList([nn.Linear(in_features, out_features) for _ in range(dropout_num)])
-
-    def forward(self, last_hidden_state, hidden_states, attention_mask):
-        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
-        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
-        sum_mask = input_mask_expanded.sum(1)
-        sum_mask = torch.clamp(sum_mask, min=1e-9)
-        mean_embeddings = sum_embeddings / sum_mask
-        norm_mean_embeddings = self.layer_norm(mean_embeddings)
-        output = torch.stack([regressor(dropout(norm_mean_embeddings)) for regressor, dropout in zip(self.linears, self.dropouts)]).mean(axis=0)
-        return output
-
-
-class MeanMaxPoolingHead(nn.Module):
-    def __init__(self, in_features, out_features) -> None:
-        super().__init__()
-        self.layer_norm = nn.LayerNorm(in_features * 2)
-        self.linear = nn.Linear(in_features * 2, out_features)
-
-    def forward(self, last_hidden_state, hidden_states, attention_mask):
-        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
-        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
-        sum_mask = input_mask_expanded.sum(1)
-        sum_mask = torch.clamp(sum_mask, min=1e-9)
-        mean_embeddings = sum_embeddings / sum_mask
-
-        max_embeddings, _ = torch.max(last_hidden_state, 1)
-        mean_max_embeddings = torch.cat(
-            (
-                mean_embeddings,
-                max_embeddings,
-            ),
-            1,
-        )
-        logits = self.linear(self.layer_norm(mean_max_embeddings))
-
-        return logits
-
-
-class CLSConcatHead(nn.Module):
-    def __init__(self, in_features, out_features, num_hidden_layers) -> None:
-        super().__init__()
-        self.num_hidden_layers = num_hidden_layers
-        self.linear = nn.Linear(in_features * num_hidden_layers, out_features)
-
-    def forward(self, last_hidden_state, hidden_states, attention_mask):
-        x = torch.cat([hidden_states[-(i + 1)][:, 0, :] for i in range(self.num_hidden_layers)], dim=1)
-        output = self.linear(x)
-        return output
-
-
-class WeightedLayerPoolingHead(nn.Module):
-    def __init__(self, in_features, out_features, num_hidden_layers, weights=None):
+class WeightedLayerPooling(nn.Module):
+    def __init__(self, in_features, num_hidden_layers, weights) -> None:
         super().__init__()
         self.num_hidden_layers = num_hidden_layers
         self.layer_weights = (
@@ -193,7 +122,7 @@ class WeightedLayerPoolingHead(nn.Module):
             else nn.Parameter(torch.tensor([1] * num_hidden_layers, dtype=torch.float))
         )
         self.layer_norm = nn.LayerNorm(in_features)
-        self.linear = nn.Linear(in_features, out_features)
+        self.out_size = in_features
 
     def forward(self, last_hidden_state, hidden_states, attention_mask):
         all_layer_embedding = torch.stack(hidden_states)
@@ -209,18 +138,11 @@ class WeightedLayerPoolingHead(nn.Module):
         mean_embeddings = sum_embeddings / sum_mask
         norm_mean_embeddings = self.layer_norm(mean_embeddings)
 
-        output = self.linear(norm_mean_embeddings)
-
-        return output
+        return norm_mean_embeddings
 
 
-class LSTMHead(nn.Module):
-    def __init__(
-        self,
-        in_features,
-        out_features,
-        dropout,
-    ):
+class LSTMPooling(nn.Module):
+    def __init__(self, in_features, dropout) -> None:
         super().__init__()
         self.lstm = nn.LSTM(
             input_size=in_features,
@@ -230,22 +152,15 @@ class LSTMHead(nn.Module):
             dropout=dropout,
         )
         self.layer_norm = nn.LayerNorm(in_features * 2)
-        self.linear = nn.Linear(in_features * 2, out_features)
+        self.out_size = in_features * 2
 
     def forward(self, last_hidden_state, hidden_states, attention_mask):
-        x, _ = self.lstm(last_hidden_state, None)
-        x = self.layer_norm(x[:, -1, :])
-        output = self.linear(x)
-        return output
+        output, (h, c) = self.lstm(last_hidden_state, None)
+        return self.layer_norm(torch.cat([h[0], h[1]], dim=1))
 
 
-class GRUHead(nn.Module):
-    def __init__(
-        self,
-        in_features,
-        out_features,
-        dropout,
-    ):
+class GRUPooling(nn.Module):
+    def __init__(self, in_features, dropout) -> None:
         super().__init__()
         self.gru = nn.GRU(
             input_size=in_features,
@@ -255,13 +170,52 @@ class GRUHead(nn.Module):
             dropout=dropout,
         )
         self.layer_norm = nn.LayerNorm(in_features * 2)
-        self.linear = nn.Linear(in_features * 2, out_features)
+        self.out_size = in_features * 2
 
     def forward(self, last_hidden_state, hidden_states, attention_mask):
-        x, _ = self.gru(last_hidden_state, None)
-        x = self.layer_norm(x[:, -1, :])
+        output, h = self.gru(last_hidden_state, None)
+        return self.layer_norm(torch.cat([h[0], h[1]], dim=1))
+
+
+# ====================================================
+# regressor
+# ====================================================
+class SimpleRegressor(nn.Module):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        dropout_rate,
+    ):
+        super().__init__()
+        self.layer_norm = nn.LayerNorm(in_features)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.linear = nn.Linear(in_features=in_features, out_features=out_features)
+
+    def forward(self, x):
+        x = self.layer_norm(x)
+        x = self.dropout(x)
         output = self.linear(x)
-        return output.squeeze(-1)
+        return output
+
+
+class MultiSampleDropoutRegressor(nn.Module):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        dropout_num,
+        dropout_rate,
+    ):
+        super().__init__()
+        self.layer_norm = nn.LayerNorm(in_features)
+        self.dropouts = nn.ModuleList([nn.Dropout(dropout_rate) for _ in range(dropout_num)])
+        self.linears = nn.ModuleList([nn.Linear(in_features, out_features) for _ in range(dropout_num)])
+
+    def forward(self, x):
+        x = self.layer_norm(x)
+        output = torch.stack([regressor(dropout(x)) for regressor, dropout in zip(self.linears, self.dropouts)]).mean(axis=0)
+        return output
 
 
 # ====================================================
@@ -282,8 +236,10 @@ class EvalModel(pl.LightningModule):
 
         if encoder_cfg.params is None:
             encoder_cfg.params = {}
-        if head_cfg.params is None:
-            head_cfg.params = {}
+        if head_cfg.pooling.params is None:
+            head_cfg.pooling.params = {}
+        if head_cfg.regressor.params is None:
+            head_cfg.regressor.params = {}
 
         # encoder
         self.config = transformers.AutoConfig.from_pretrained(config_cfg.path)
@@ -296,10 +252,14 @@ class EvalModel(pl.LightningModule):
             self.encoder = transformers.AutoModel.from_config(config=self.config)
 
         # head
-        self.head = eval(head_cfg.type)(
+        self.pooling = eval(head_cfg.pooling.type)(
             in_features=self.config.hidden_size,
+            **head_cfg.pooling.params,
+        )
+        self.regressor = eval(head_cfg.regressor.type)(
+            in_features=self.pooling.out_size,
             out_features=6,
-            **head_cfg.params,
+            **head_cfg.regressor.params,
         )
 
     def extract_hidden_states_step(self, batch, batch_idx):
@@ -325,16 +285,17 @@ class EvalModel(pl.LightningModule):
         return y_hat.detach().cpu().float()
 
     def forward(self, x):
-        output = self.encoder(
+        encoder_output = self.encoder(
             input_ids=x["input_ids"],
             attention_mask=x["attention_mask"],
             output_hidden_states=True,
         )
-        predictions = self.head(
-            last_hidden_state=output["last_hidden_state"],
-            hidden_states=output["hidden_states"],
+        pooling_output = self.pooling(
+            last_hidden_state=encoder_output["last_hidden_state"],
+            hidden_states=encoder_output["hidden_states"],
             attention_mask=x["attention_mask"],
         )
+        predictions = self.regressor(pooling_output)
         return predictions
 
 
@@ -363,8 +324,10 @@ class Model(EvalModel):
             self._freeze_encoder(num_freeze_layers=encoder_cfg.num_freeze_layers)
         if encoder_cfg.num_reinit_layers:
             self._reinit_encoder(num_reinit_layers=encoder_cfg.num_reinit_layers)
-        if head_cfg.init:
-            self._init_head_weights()
+        if head_cfg.pooling.init:
+            self._init_weights(self.pooling)
+        if head_cfg.regressor.init:
+            self._init_weights(self.regressor)
 
         self.optimizer_cfg = optimizer_cfg
         self.scheduler_cfg = scheduler_cfg
@@ -431,11 +394,17 @@ class Model(EvalModel):
         print("#", f"head: lr={head_lr:.8f}")
         optimizer_parameters = [
             {
-                "params": [p for n, p in self.head.named_parameters()],
+                "params": [p for n, p in self.regressor.named_parameters()],
                 "lr": head_lr,
                 "weight_decay": 0.0,
-            }
+            },
+            {
+                "params": [p for n, p in self.pooling.named_parameters()],
+                "lr": head_lr,
+                "weight_decay": 0.0,
+            },
         ]
+
         # encoder
         ### encoder
         num_layers = self.config.num_hidden_layers
@@ -475,11 +444,11 @@ class Model(EvalModel):
 
         return optimizer_parameters
 
-    def _init_head_weights(self):
+    def _init_weights(self, x):
         if self.config.to_dict().get("initializer_range") is None:
             return
 
-        for module in self.head.modules():
+        for module in x.modules():
             if isinstance(module, nn.Linear):
                 module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
                 if module.bias is not None:
