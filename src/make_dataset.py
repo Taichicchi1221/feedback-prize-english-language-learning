@@ -6,10 +6,10 @@ import shutil
 UPLOAD = False
 
 DATASET_DIR = "../datasets"
-DATASET_NAME = "feedback3-deberta-v3-xsmall"
+DATASET_NAME = "feedback3-deberta-v3-base"
 
-EXPERIMENT_ID = "2"
-RUN_ID = "e837a0acb01e433baa4a9dce0e32b001"
+EXPERIMENT_ID = "16"
+RUN_ID = "636425503d944baa8dbdea0716d462c4"
 
 
 MLFLOW_DIR = f"../mlruns/{EXPERIMENT_ID}"

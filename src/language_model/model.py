@@ -7,7 +7,7 @@ import transformers
 
 ##
 from utils import *
-from loss import get_loss, get_metric
+from loss import get_loss, get_metric, need_sigmoid, TARGET_MAX, TARGET_MIN
 from optimizer import get_optimizer, get_scheduler, AdversarialLearner, hook_sift_layer, AWP
 
 
@@ -120,22 +120,53 @@ class MeanPoolingHead(nn.Module):
         return logits
 
 
+class MeanPoolingMultiSampleDropoutHead(nn.Module):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        dropout_num,
+        dropout_rate,
+    ):
+        super().__init__()
+        self.layer_norm = nn.LayerNorm(in_features)
+        self.linear = nn.Linear(in_features, out_features)
+        self.dropouts = nn.ModuleList([nn.Dropout(dropout_rate) for _ in range(dropout_num)])
+        self.linears = nn.ModuleList([nn.Linear(in_features, out_features) for _ in range(dropout_num)])
+
+    def forward(self, last_hidden_state, hidden_states, attention_mask):
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
+        sum_mask = input_mask_expanded.sum(1)
+        sum_mask = torch.clamp(sum_mask, min=1e-9)
+        mean_embeddings = sum_embeddings / sum_mask
+        norm_mean_embeddings = self.layer_norm(mean_embeddings)
+        output = torch.stack([regressor(dropout(norm_mean_embeddings)) for regressor, dropout in zip(self.linears, self.dropouts)]).mean(axis=0)
+        return output
+
+
 class MeanMaxPoolingHead(nn.Module):
     def __init__(self, in_features, out_features) -> None:
         super().__init__()
+        self.layer_norm = nn.LayerNorm(in_features * 2)
         self.linear = nn.Linear(in_features * 2, out_features)
 
     def forward(self, last_hidden_state, hidden_states, attention_mask):
-        mean_pooling_embeddings = torch.mean(last_hidden_state, 1)
-        max_pooling_embeddings, _ = torch.max(last_hidden_state, 1)
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
+        sum_mask = input_mask_expanded.sum(1)
+        sum_mask = torch.clamp(sum_mask, min=1e-9)
+        mean_embeddings = sum_embeddings / sum_mask
+
+        max_embeddings, _ = torch.max(last_hidden_state, 1)
         mean_max_embeddings = torch.cat(
             (
-                mean_pooling_embeddings,
-                max_pooling_embeddings,
+                mean_embeddings,
+                max_embeddings,
             ),
             1,
         )
-        logits = self.linear(mean_max_embeddings)  # twice the hidden size
+        logits = self.linear(self.layer_norm(mean_max_embeddings))
 
         return logits
 
@@ -152,43 +183,34 @@ class CLSConcatHead(nn.Module):
         return output
 
 
-class WeightedCLSMeanHead(nn.Module):
-    def __init__(self, in_features, out_features, num_hidden_layers, weights) -> None:
+class WeightedLayerPoolingHead(nn.Module):
+    def __init__(self, in_features, out_features, num_hidden_layers, weights=None):
         super().__init__()
-        assert num_hidden_layers == len(weights)
         self.num_hidden_layers = num_hidden_layers
-        self.weights = weights
+        self.layer_weights = (
+            nn.Parameter(torch.tensor(weights, dtype=torch.float))
+            if weights is not None
+            else nn.Parameter(torch.tensor([1] * num_hidden_layers, dtype=torch.float))
+        )
+        self.layer_norm = nn.LayerNorm(in_features)
         self.linear = nn.Linear(in_features, out_features)
 
     def forward(self, last_hidden_state, hidden_states, attention_mask):
-        x = torch.sum(
-            torch.stack(
-                [self.weights[i] * hidden_states[-(i + 1)][:, 0, :] for i in range(self.num_hidden_layers)],
-                dim=0,
-            ),
-            dim=0,
-        ) / sum(self.weights)
-        output = self.linear(x)
-        return output
+        all_layer_embedding = torch.stack(hidden_states)
+        all_layer_embedding = all_layer_embedding[-self.num_hidden_layers :, :, :, :]
 
+        weight_factor = self.layer_weights.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(all_layer_embedding.size())
+        weighted_average = (weight_factor * all_layer_embedding).sum(dim=0) / self.layer_weights.sum()
 
-class WeightedEmbeddingMeanPoolingHead(nn.Module):
-    def __init__(self, in_features, out_features, num_hidden_layers, weights) -> None:
-        super().__init__()
-        assert num_hidden_layers == len(weights)
-        self.num_hidden_layers = num_hidden_layers
-        self.weights = weights
-        self.mean_pooling = MeanPoolingHead(in_features, out_features)
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(weighted_average.size()).float()
+        sum_embeddings = torch.sum(weighted_average * input_mask_expanded, 1)
+        sum_mask = input_mask_expanded.sum(1)
+        sum_mask = torch.clamp(sum_mask, min=1e-9)
+        mean_embeddings = sum_embeddings / sum_mask
+        norm_mean_embeddings = self.layer_norm(mean_embeddings)
 
-    def forward(self, last_hidden_state, hidden_states, attention_mask):
-        x = torch.sum(
-            torch.stack(
-                [self.weights[i] * hidden_states[-(i + 1)] for i in range(self.num_hidden_layers)],
-                dim=0,
-            ),
-            dim=0,
-        ) / sum(self.weights)
-        output = self.mean_pooling(last_hidden_state, x, attention_mask)
+        output = self.linear(norm_mean_embeddings)
+
         return output
 
 
@@ -242,28 +264,6 @@ class GRUHead(nn.Module):
         return output.squeeze(-1)
 
 
-class CNNHead(nn.Module):
-    def __init__(
-        self,
-        in_features,
-        out_features,
-        hidden_size,
-        kernel_size,
-    ):
-        super().__init__()
-        self.cnn1 = nn.Conv1d(in_features, hidden_size, kernel_size=kernel_size, padding=1)
-        self.cnn2 = nn.Conv1d(hidden_size, out_features, kernel_size=kernel_size, padding=1)
-        self.activation = nn.PReLU()
-
-    def forward(self, last_hidden_state, hidden_states, attention_mask):
-        x = last_hidden_state.permute(0, 2, 1)
-        x = self.cnn1(x)
-        x = self.activation(x)
-        x = self.cnn2(x)
-        x, _ = torch.max(x, 2)
-        return x
-
-
 # ====================================================
 # model
 # ====================================================
@@ -273,9 +273,12 @@ class EvalModel(pl.LightningModule):
         config_cfg,
         encoder_cfg,
         head_cfg,
+        loss_cfg,
         pretrained=True,
     ):
         super().__init__()
+
+        self.need_sigmoid = need_sigmoid(loss_cfg.type)
 
         if encoder_cfg.params is None:
             encoder_cfg.params = {}
@@ -317,6 +320,8 @@ class EvalModel(pl.LightningModule):
 
     def predict_step(self, batch, batch_idx):
         y_hat = self(batch)
+        if self.need_sigmoid:
+            y_hat = y_hat.sigmoid() * (TARGET_MAX - TARGET_MIN) + TARGET_MIN
         return y_hat.detach().cpu().float()
 
     def forward(self, x):
@@ -351,8 +356,11 @@ class Model(EvalModel):
             config_cfg=config_cfg,
             encoder_cfg=encoder_cfg,
             head_cfg=head_cfg,
+            loss_cfg=loss_cfg,
             pretrained=pretrained,
         )
+        if encoder_cfg.num_freeze_layers:
+            self._freeze_encoder(num_freeze_layers=encoder_cfg.num_freeze_layers)
         if encoder_cfg.num_reinit_layers:
             self._reinit_encoder(num_reinit_layers=encoder_cfg.num_reinit_layers)
         if head_cfg.init:
@@ -415,51 +423,56 @@ class Model(EvalModel):
 
     def get_optimizer_params(self, encoder_lr, head_lr, lr_decay_rate, weight_decay=0.0):
         no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-        optimizer_parameters = []
+
+        print("#" * 50)
+        print("#", f"layerwise optimization info")
+
+        # head
+        print("#", f"head: lr={head_lr:.8f}")
+        optimizer_parameters = [
+            {
+                "params": [p for n, p in self.head.named_parameters()],
+                "lr": head_lr,
+                "weight_decay": 0.0,
+            }
+        ]
         # encoder
         ### encoder
+        num_layers = self.config.num_hidden_layers
+        layers = [self.encoder.embeddings] + [l for l in self.encoder.encoder.layer]
+        layers.reverse()
+
         lr = encoder_lr
-        for layer in self.encoder.encoder.layer[::-1]:
-            optimizer_parameters.append(
+
+        for idx, layer in enumerate(layers):
+
+            # any weights of the layer requires grad?
+            requires_grad = any(map(lambda x: x.requires_grad, layer.parameters()))
+            if not requires_grad:
+                print("#", f"layer{num_layers - idx}: requires_grad: {requires_grad}")
+                continue
+
+            if idx == num_layers:
+                print("#", f"embeddings: lr={lr:.8f}, weight_decay={weight_decay}, requires_grad: {requires_grad}")
+            else:
+                print("#", f"layer{num_layers - idx}: lr={lr:.8f}, weight_decay={weight_decay}, requires_grad: {requires_grad}")
+
+            optimizer_parameters += [
                 {
                     "params": [p for n, p in layer.named_parameters() if not any(nd in n for nd in no_decay)],
                     "lr": lr,
                     "weight_decay": weight_decay,
                 },
-            )
-            optimizer_parameters.append(
                 {
                     "params": [p for n, p in layer.named_parameters() if any(nd in n for nd in no_decay)],
                     "lr": lr,
                     "weight_decay": 0.0,
                 },
-            )
+            ]
             lr *= lr_decay_rate
 
-        ### embeddings
-        optimizer_parameters.append(
-            {
-                "params": [p for n, p in self.encoder.embeddings.named_parameters() if not any(nd in n for nd in no_decay)],
-                "lr": lr,
-                "weight_decay": weight_decay,
-            },
-        )
-        optimizer_parameters.append(
-            {
-                "params": [p for n, p in self.encoder.embeddings.named_parameters() if any(nd in n for nd in no_decay)],
-                "lr": lr,
-                "weight_decay": 0.0,
-            },
-        )
+        print("#" * 50)
 
-        # head
-        optimizer_parameters.append(
-            {
-                "params": [p for n, p in self.head.named_parameters()],
-                "lr": head_lr,
-                "weight_decay": 0.0,
-            },
-        )
         return optimizer_parameters
 
     def _init_head_weights(self):
@@ -480,6 +493,8 @@ class Model(EvalModel):
                 module.weight.data.fill_(1.0)
 
     def _reinit_encoder(self, num_reinit_layers):
+        assert 0 < num_reinit_layers <= self.config.num_hidden_layers, f"num_reinit_layers must be 0 < x <= {self.config.num_hidden_layers}"
+
         for layer in self.encoder.encoder.layer[-num_reinit_layers:]:
             for module in layer.modules():
                 if isinstance(module, nn.Linear):
@@ -494,13 +509,19 @@ class Model(EvalModel):
                     module.bias.data.zero_()
                     module.weight.data.fill_(1.0)
 
+    def _freeze_encoder(self, num_freeze_layers):
+        assert 0 < num_freeze_layers <= self.config.num_hidden_layers, f"num_freeze_layers must be 0 < x <= {self.config.num_hidden_layers}"
+
+        # embeddings
+        self.encoder.embeddings.requires_grad_(False)
+
+        # encoder
+        self.encoder.encoder.layer[:num_freeze_layers].requires_grad_(False)
+
     def training_step(self, batch, batch_idx):
         y = batch["label"]
         y_hat = self(batch)
         loss = self.criterion(y_hat, y)
-
-        self.train_metric(y_hat.detach(), y.detach())
-        self.history["lr"].append(self.optimizers(False).param_groups[0]["lr"])
 
         if hasattr(self, "awp"):
             self.awp.attack_backward(self, batch, self.trainer.current_epoch)
@@ -508,12 +529,33 @@ class Model(EvalModel):
         if hasattr(self, "sift"):
             loss = loss + self.sift.loss(y, logits_fn=lambda model, batch: model(batch), batch=batch)
 
-        return loss
+        return {"loss": loss, "y_hat": y_hat, "y": y}
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        y = outputs["y"].detach()
+        y_hat = outputs["y_hat"].detach()
+        if self.need_sigmoid:
+            y_hat = y_hat.sigmoid() * (TARGET_MAX - TARGET_MIN) + TARGET_MIN
+        self.train_metric(y_hat.detach(), y.detach())
+        self.history["lr"].append(self.optimizers(False).param_groups[0]["lr"])
+
+        return super().on_train_batch_end(outputs, batch, batch_idx)
 
     def validation_step(self, batch, batch_idx):
         y = batch["label"]
         y_hat = self(batch)
+        loss = self.criterion(y_hat, y)
+
+        return {"loss": loss, "y_hat": y_hat, "y": y}
+
+    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx) -> None:
+        y = outputs["y"].detach()
+        y_hat = outputs["y_hat"].detach()
+        if self.need_sigmoid:
+            y_hat = y_hat.sigmoid() * (TARGET_MAX - TARGET_MIN) + TARGET_MIN
         self.valid_metric(y_hat.detach(), y.detach())
+
+        return super().on_validation_batch_end(outputs, batch, batch_idx, dataloader_idx)
 
     def on_validation_epoch_end(self) -> None:
         self.log(

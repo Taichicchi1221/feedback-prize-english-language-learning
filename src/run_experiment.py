@@ -18,8 +18,32 @@ MLFLOW_DIR = "../mlruns"
 
 ########################## source directory and experiment name ##########################
 SRC_DIR = "language_model"
-EXPERIMENT_NAME = "baseline_tuning"
-OVERWRITE_PARAMS = [None]
+EXPERIMENT_NAME = "deberta-v3-base_preprocess"
+OVERWRITE_PARAMS = [
+    {
+        "preprocessor.method": "convert_paragraph_split_to_sep",
+    },
+]
+
+# OVERWRITE_PARAMS = [
+#     {
+#         "globals.use_folds": "null",
+#         "model.encoder.path": "microsoft/deberta-v3-base",
+#         "tokenizer.max_length.train": 512,
+#         "tokenizer.max_length.test": 512,
+#         "dataloader.train.batch_size": 8,
+#         "dataloader.test.batch_size": 8,
+#         "trainer.train.accumulate_grad_batches": 2,
+#         "optimizer.lr.encoder": lr,
+#         "optimizer.lr.head": lr,
+#         "optimizer.lr_decay_rate": dec,
+#         "model.encoder.num_freeze_layers": 12,
+#     }
+#     for lr, dec in product(
+#         [4.0e-05, 8.0e-05, 16.0e-05],
+#         [0.25, 0.5],
+#     )
+# ]
 
 
 # SRC_DIR = "pretrain"
@@ -38,6 +62,7 @@ if SRC_DIR == "language_model":
         "optimizer.py",
         "tokenizer.py",
         "model.py",
+        "preprocess.py",
     ]
     CONFIGFILE_NAME = "language_model_config.yaml"
     WORKFILE_TO_CLEAR = ["__pycache__", "main.log", "lightning_logs", ".hydra"]
@@ -183,17 +208,20 @@ def main(overwrite_params: dict):
     print("=" * 25, "PROCESS", "=" * 25)
 
     if ret.returncode:
-        return
+        return ret.returncode
 
     remove_work_files(WORKFILE_TO_CLEAR)
 
     # save results
     if cfg.globals.debug:
-        return
+        return ret.returncode
     if REPORT_RESULTS:
         save_results_main()
+    return ret.returncode
 
 
 if __name__ == "__main__":
     for overwrite_params in OVERWRITE_PARAMS:
-        main(overwrite_params)
+        returncode = main(overwrite_params)
+        if returncode:
+            break

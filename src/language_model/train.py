@@ -62,6 +62,7 @@ from optimizer import get_optimizer, get_scheduler
 from tokenizer import get_tokenizer
 from dataset import Dataset, Collate
 from model import *
+from preprocess import Preprocessor
 
 # ====================================================
 # constants
@@ -80,6 +81,7 @@ def train_function(
     train_df,
     valid_df,
     tokenizer,
+    preprocess_method_name,
     train_max_length,
     valid_max_length,
     train_collate_function,
@@ -95,11 +97,13 @@ def train_function(
     model.train()
 
     # dataset
+    train_preprocessor = Preprocessor(tokenizer=tokenizer, max_length=train_max_length)
     train_dataset = Dataset(
         train_df,
         tokenizer=tokenizer,
         max_length=train_max_length,
         target_names=TARGET_NAMES,
+        preprocess_func=getattr(train_preprocessor, preprocess_method_name),
     )
     train_collate_function = Collate(tokenizer, max_length=train_max_length)
     train_dataloader = torch.utils.data.DataLoader(
@@ -109,11 +113,13 @@ def train_function(
     )
 
     if valid_df is not None:
+        valid_preprocessor = Preprocessor(tokenizer=tokenizer, max_length=valid_max_length)
         valid_dataset = Dataset(
             valid_df,
             tokenizer=tokenizer,
             max_length=valid_max_length,
             target_names=TARGET_NAMES,
+            preprocess_func=getattr(valid_preprocessor, preprocess_method_name),
         )
         valid_collate_function = Collate(tokenizer, max_length=valid_max_length)
         valid_dataloader = torch.utils.data.DataLoader(
@@ -159,24 +165,27 @@ def train_function(
 def predict_function(
     df,
     tokenizer,
+    preprocess_method_name,
     max_length,
     collate_function,
     dataloader_args,
     model,
     trainer_args,
 ):
+    preprocessor = Preprocessor(tokenizer=tokenizer, max_length=max_length)
     dataset = Dataset(
         df=df,
         tokenizer=tokenizer,
         max_length=max_length,
         target_names=TARGET_NAMES,
+        preprocess_func=getattr(preprocessor, preprocess_method_name),
     )
     dataloader = torch.utils.data.DataLoader(
         dataset,
         collate_fn=collate_function,
         **dataloader_args,
     )
-    predict_trainer = pl.Trainer(**trainer_args)
+    predict_trainer = pl.Trainer(**trainer_args, logger=None)
     model.eval()
     return torch.cat(predict_trainer.predict(model=model, dataloaders=dataloader)).numpy()
 
@@ -201,9 +210,13 @@ def main(cfg):
 
     prepare_fold(train_df, n_fold=cfg.globals.n_fold, target_names=TARGET_NAMES)
     oof_df_list = []
+    val_df_list = []
     model_path_list = []
 
     for fold in range(cfg.globals.n_fold):
+        if cfg.globals.use_folds is not None and fold not in cfg.globals.use_folds:
+            continue
+
         print("#" * 30, f"fold: {fold}", "#" * 30)
         train = train_df.query(f"fold != {fold}").reset_index(drop=True)
         valid = train_df.query(f"fold == {fold}").reset_index(drop=True)
@@ -238,6 +251,7 @@ def main(cfg):
             train_df=train,
             valid_df=valid,
             tokenizer=tokenizer,
+            preprocess_method_name=cfg.preprocessor.method,
             train_max_length=cfg.tokenizer.max_length.train,
             valid_max_length=cfg.tokenizer.max_length.test,
             train_collate_function=train_collate_function,
@@ -271,12 +285,14 @@ def main(cfg):
             config_cfg=cfg.config,
             encoder_cfg=cfg.model.encoder,
             head_cfg=cfg.model.head,
+            loss_cfg=cfg.loss,
             pretrained=False,
         )
 
         oof_prediction = predict_function(
             df=valid,
             tokenizer=tokenizer,
+            preprocess_method_name=cfg.preprocessor.method,
             max_length=cfg.tokenizer.max_length.test,
             collate_function=valid_collate_function,
             dataloader_args=cfg.dataloader.test,
@@ -319,6 +335,7 @@ def main(cfg):
                 train_df=pseudo_labeling_train_df,
                 valid_df=None,
                 tokenizer=tokenizer,
+                preprocess_method_name=cfg.preprocessor.method,
                 train_max_length=cfg.tokenizer.max_length.train,
                 valid_max_length=None,
                 train_collate_function=train_collate_function,
@@ -334,6 +351,7 @@ def main(cfg):
             oof_prediction = predict_function(
                 df=valid,
                 tokenizer=tokenizer,
+                preprocess_method_name=cfg.preprocessor.method,
                 max_length=cfg.tokenizer.max_length.test,
                 collate_function=valid_collate_function,
                 dataloader_args=cfg.dataloader.test,
@@ -349,9 +367,10 @@ def main(cfg):
             )
 
         oof_df_list.append(oof_prediction_df)
+        val_df = train_df.query(f"fold == {fold}").sort_values("text_id").reset_index(drop=True)
+        val_df_list.append(val_df)
 
         oof_prediction_df.sort_values("text_id", inplace=True)
-        val_df = train_df.query(f"fold == {fold}").sort_values("text_id").reset_index(drop=True)
         score, detail_score = MCRMSE(val_df[TARGET_NAMES].to_numpy(), oof_prediction_df[TARGET_NAMES].to_numpy())
         oof_score_result = {"oof_score": score}
         for i, target_name in enumerate(TARGET_NAMES):
@@ -364,9 +383,13 @@ def main(cfg):
         torch.cuda.empty_cache()
         pl.utilities.memory.garbage_collection_cuda()
 
+    val_df = pd.concat(val_df_list, axis=0)
+    val_df.sort_values("text_id", inplace=True)
+
     oof_df = pd.concat(oof_df_list, axis=0)
     oof_df.sort_values("text_id", inplace=True)
-    valid_score, valid_detail_score = MCRMSE(train_df[TARGET_NAMES].to_numpy(), oof_df[TARGET_NAMES].to_numpy())
+
+    valid_score, valid_detail_score = MCRMSE(val_df[TARGET_NAMES].to_numpy(), oof_df[TARGET_NAMES].to_numpy())
     valid_score_result = {"valid_score": valid_score}
     for i, target_name in enumerate(TARGET_NAMES):
         valid_score_result[f"valid_score_{target_name}"] = valid_detail_score[i]
@@ -379,13 +402,13 @@ def main(cfg):
     # plots
     plot_dist(
         preds=oof_df[TARGET_NAMES].to_numpy(),
-        target=train_df[TARGET_NAMES].to_numpy(),
+        target=val_df[TARGET_NAMES].to_numpy(),
         filename="plots/oof_dist.png",
         target_names=TARGET_NAMES,
     )
     plot_scatter(
         preds=oof_df[TARGET_NAMES].to_numpy(),
-        target=train_df[TARGET_NAMES].to_numpy(),
+        target=val_df[TARGET_NAMES].to_numpy(),
         filename="plots/oof_scatter.png",
         target_names=TARGET_NAMES,
     )

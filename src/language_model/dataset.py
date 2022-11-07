@@ -11,6 +11,7 @@ class Dataset(torch.utils.data.Dataset):
         tokenizer=None,
         max_length=None,
         target_names=None,
+        preprocess_func=None,
     ):
         assert max_length is not None
         self.max_length = max_length
@@ -18,6 +19,20 @@ class Dataset(torch.utils.data.Dataset):
         self.tokenizer = tokenizer
 
         self.text_ids = df["text_id"].to_numpy()
+
+        self.input_ids = []
+        self.attention_mask = []
+
+        for text in df["full_text"].to_list():
+            preprocessed_text = preprocess_func(text)
+            tokens = self.tokenizer.encode_plus(
+                preprocessed_text,
+                truncation=True,
+                max_length=self.max_length,
+            )
+            self.input_ids.append(tokens["input_ids"])
+            self.attention_mask.append(tokens["attention_mask"])
+
         self.texts = df["full_text"].to_numpy()
         self.labels = df[target_names].to_numpy()
 
@@ -27,18 +42,13 @@ class Dataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        text = self.texts[idx]
-
-        output = self.tokenizer.encode_plus(
-            text,
-            max_length=self.max_length,
-            truncation=True,
-        )
-
-        output["text_id"] = self.text_ids[idx]
-        output["label"] = self.labels[idx]
-
-        return output
+        return {
+            "input_ids": self.input_ids[idx],
+            "attention_mask": self.attention_mask[idx],
+            "text_id": self.text_ids[idx],
+            "text": self.texts[idx],
+            "label": self.labels[idx],
+        }
 
 
 class Collate:

@@ -6,6 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
 
+TARGET_MIN = 1.0
+TARGET_MAX = 5.0
+
 # ====================================================
 # loss
 # ====================================================
@@ -13,10 +16,27 @@ def get_loss(loss_type, loss_params):
     if loss_params is None:
         loss_params = {}
 
-    if loss_type in ("MCRMSELoss", "SmoothL1Loss"):
+    if loss_type in ("MCRMSELoss", "SmoothL1Loss", "ScaledMCBCELoss"):
         return eval(loss_type)(**loss_params)
 
     return getattr(torch.nn, loss_type)(**loss_params)
+
+
+def need_sigmoid(loss_type):
+    if loss_type in ("ScaledMCBCELoss",):
+        return True
+    return False
+
+
+class ScaledMCBCELoss(nn.Module):
+    def __init__(self, TARGET_MAX: float = TARGET_MAX, TARGET_MIN: float = TARGET_MIN) -> None:
+        super().__init__()
+        self.TARGET_MAX = TARGET_MAX
+        self.TARGET_MIN = TARGET_MIN
+
+    def forward(self, preds, target):
+        scaled_target = (target - self.TARGET_MIN) / (self.TARGET_MAX - self.TARGET_MIN)
+        return torch.mean(torch.mean(F.binary_cross_entropy_with_logits(preds, scaled_target, reduction="none"), dim=0))
 
 
 class MCRMSELoss(nn.Module):
@@ -42,7 +62,7 @@ class SmoothL1Loss(nn.Module):
 # metric
 # ====================================================
 def MCRMSE(y_true, y_preds):
-    assert y_true.shape == y_preds.shape
+    assert y_true.shape == y_preds.shape, f"y_true.shape={y_true.shape} != y_preds.shape={y_preds.shape}"
     scores = np.sqrt(np.mean(np.square(y_true - y_preds), axis=0))
     mcrmse_score = np.mean(scores)
     return mcrmse_score, scores

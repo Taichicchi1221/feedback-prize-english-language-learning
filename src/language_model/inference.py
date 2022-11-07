@@ -108,12 +108,14 @@ def main():
             config_cfg=cfg.config,
             encoder_cfg=cfg.model.encoder,
             head_cfg=cfg.model.head,
+            loss_cfg=cfg.loss,
             pretrained=False,
         )
 
         test_prediction = predict_function(
             df=test,
             tokenizer=tokenizer,
+            preprocess_method_name=cfg.preprocessor.method,
             max_length=cfg.tokenizer.max_length.test,
             collate_function=valid_collate_function,
             dataloader_args=cfg.dataloader.test,
@@ -159,6 +161,7 @@ def main():
                 train_df=pseudo_labeling_train_df,
                 valid_df=None,
                 tokenizer=tokenizer,
+                preprocess_method_name=cfg.preprocessor.method,
                 train_max_length=cfg.tokenizer.max_length.train,
                 valid_max_length=None,
                 train_collate_function=train_collate_function,
@@ -174,6 +177,7 @@ def main():
             test_prediction = predict_function(
                 df=test,
                 tokenizer=tokenizer,
+                preprocess_method_name=cfg.preprocessor.method,
                 max_length=cfg.tokenizer.max_length.test,
                 collate_function=valid_collate_function,
                 dataloader_args=cfg.dataloader.test,

@@ -75,7 +75,7 @@ class AWP:
 
         self._save(model)
         for i in range(self.adv_step):
-            with torch.cuda.amp.autocast(model.trainer.use_amp):
+            with torch.cuda.amp.autocast(bool(model.trainer.amp_backend)):
                 y_hat = model(batch)
                 loss = model.criterion(y_hat, batch["label"])
             self._attack_step(model)

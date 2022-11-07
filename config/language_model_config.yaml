@@ -5,7 +5,8 @@ hydra:
 globals:
   seed: 42
   n_fold: 5
-  epochs: 7
+  use_folds: null
+  epochs: 5
   pseudo_label_epochs: 0
   steps_per_epoch: -1 # must be set in script
   total_steps: -1 # must be set in script
@@ -17,6 +18,9 @@ tokenizer:
     test: 512
   path: ${model.encoder.path}
   params:
+
+preprocessor:
+  method: original_text
 
 dataloader:
   train:
@@ -41,7 +45,7 @@ trainer:
     strategy:
     gradient_clip_algorithm: norm
     gradient_clip_val: 
-    accumulate_grad_batches: 1
+    accumulate_grad_batches: 2
     amp_backend: native
     amp_level:
     val_check_interval: 0.2
@@ -72,26 +76,27 @@ model:
   encoder:
     path: microsoft/deberta-v3-base
     num_reinit_layers: 1
+    num_freeze_layers: 0
     params:
       hidden_dropout: 0.0
       hidden_dropout_prob: 0.0
       attention_dropout: 0.0
       attention_probs_dropout_prob: 0.0
+      layer_norm_eps: 1.0e-12
   head:
     type: MeanPoolingHead
     init: True
     params:
-      # dropout_rate: 0.0 # SimpleHead, MultiSampleDropoutHead
-      # dropout_num: 10 # MultiSampleDropoutHead
-      # num_hidden_layers: 4 # CLSConcatHead, WeightedCLSMeanHead, WeightedEmbeddingMeanPoolingHead
-      # weights: [1, 0.8, 0.6, 0.4] # WeightedCLSMeanHead, WeightedEmbeddingMeanPoolingHead
+      # dropout_rate: 0.5 # SimpleHead, MultiSampleDropoutHead, MeanPoolingMultiSampleDropoutHead
+      # dropout_num: 5 # MultiSampleDropoutHead, MeanPoolingMultiSampleDropoutHead
+      # num_hidden_layers: 3 # CLSConcatHead, WeightedLayerPoolingHead
+      # weights: null # WeightedLayerPoolingHead
       # hidden_features: 1024 # AttentionHead, MaskAddedAttentionHead
-      # hidden_size: 256 # CNNHead
-      # kernel_size: 8 # CNNHead
       # dropout: 0.0 # LSTMHead, GRUHead
+      
 
 loss:
-  type: MCRMSELoss # [SmoothL1Loss, MCRMSELoss]
+  type: MCRMSELoss # [MCRMSELoss, SmoothL1Loss, ScaledMCBCELoss]
   params:
 
 metric:
@@ -102,32 +107,33 @@ metric:
 optimizer:
   type: AdamW # [SGD, Adam, AdamW, RAdam, AdaBelief]
   lr:
-    encoder: 8.0e-05
-    head: 8.0e-05
-  lr_decay_rate: 0.5
+    encoder: 24.0e-05
+    head: 24.0e-05
+  lr_decay_rate: 0.10
   weight_decay: 0.0
   params:
     # momentum: 0.0
-    eps: 1.0e-06
+    # eps: 1.0e-06
     # betas: [0.9, 0.999] # RAdam
   
 scheduler:
   ### torch
-  type: CosineAnnealingWarmRestarts # [CosineAnnealingLR, CosineAnnealingWarmRestarts]
-  interval: step # [epoch, step]
-  params:
-    # T_max: ${globals.steps_per_epoch} # CosineAnnealingLR
-    T_0: ${globals.steps_per_epoch} # CosineAnnealingWarmRestarts
-    T_mult: 2 # CosineAnnealingWarmRestarts
-    eta_min: 1.0e-12 # CosineAnnealingLR, CosineAnnealingWarmRestarts
-    # verbose: False
-  
-  ### transformers
-  # type: cosine # ['linear', 'cosine', 'cosine_with_restarts', 'polynomial', 'constant', 'constant_with_warmup']
+  # type: CosineAnnealingWarmRestarts # [CosineAnnealingLR, CosineAnnealingWarmRestarts]
   # interval: step # [epoch, step]
   # params:
-  #   num_warmup_steps: ${globals.steps_per_epoch}
-  #   num_training_steps: ${globals.total_steps}
+  #   # T_max: ${globals.steps_per_epoch} # CosineAnnealingLR
+  #   T_0: ${globals.steps_per_epoch} # CosineAnnealingWarmRestarts
+  #   T_mult: 2 # CosineAnnealingWarmRestarts
+  #   eta_min: 1.0e-16 # CosineAnnealingLR, CosineAnnealingWarmRestarts
+  #   verbose: False
+  
+  ### transformers
+  type: cosine # ['linear', 'cosine', 'cosine_with_restarts', 'polynomial', 'constant', 'constant_with_warmup']
+  interval: step # [epoch, step]
+  params:
+    num_warmup_steps: ${globals.steps_per_epoch}
+    num_training_steps: ${globals.total_steps}
+
 
 pseudo_label_optimizer:
   type: ${optimizer.type} # [SGD, Adam, AdamW, RAdam]
@@ -138,7 +144,7 @@ pseudo_label_optimizer:
   weight_decay: ${optimizer.weight_decay}
   params:
     # momentum: ${optimizer.params.momentum}
-    eps: ${optimizer.params.eps}
+    # eps: ${optimizer.params.eps}
     # betas: ${optimizer.params.betas} # RAdam
 
 pseudo_label_scheduler:
