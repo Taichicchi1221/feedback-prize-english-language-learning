@@ -74,21 +74,36 @@ TARGET_NAMES = [
     "grammar",
     "conventions",
 ]
+
+# ====================================================
+# cli args
+# ====================================================
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-dir", default=".")
+    parser.add_argument("--output-dir", default=".")
+    parser.add_argument("--work_dir", default=".")
+
+    return parser.parse_args()
+
+
 # ====================================================
 # main
 # ====================================================
 def main():
-    cfg = OmegaConf.load("config.yaml")
-    model_path_list = joblib.load("model_path_list.pkl")
-    cfg.config.path = "config_tokenizer"
-    cfg.tokenizer.path = "config_tokenizer"
+    args = parse_args()
+
+    cfg = OmegaConf.load(os.path.join(args.input_dir, "config.yaml"))
+    model_path_list = joblib.load(os.path.join(args.input_dir, "model_path_list.pkl"))
+    cfg.config.path = os.path.join(args.input_dir, "config_tokenizer")
+    cfg.tokenizer.path = os.path.join(args.input_dir, "config_tokenizer")
 
     seed_everything(cfg.globals.seed, deterministic=True)
 
-    train_df = pd.read_csv("../input/feedback-prize-english-language-learning/train.csv")
+    train_df = pd.read_csv(os.path.join(args.work_dir, "../input/feedback-prize-english-language-learning/train.csv"))
     prepare_fold(train_df, n_fold=cfg.globals.n_fold, target_names=TARGET_NAMES)
 
-    test_df = pd.read_csv("../input/feedback-prize-english-language-learning/test.csv")
+    test_df = pd.read_csv(os.path.join(args.work_dir, "../input/feedback-prize-english-language-learning/test.csv"))
     for target_name in TARGET_NAMES:
         test_df[target_name] = -1
 
@@ -104,7 +119,7 @@ def main():
         valid_collate_function = Collate(tokenizer=tokenizer, max_length=cfg.tokenizer.max_length.test)
 
         model = EvalModel.load_from_checkpoint(
-            model_path,
+            os.path.join(args.input_dir, model_path),
             config_cfg=cfg.config,
             encoder_cfg=cfg.model.encoder,
             head_cfg=cfg.model.head,
@@ -199,7 +214,7 @@ def main():
     submission_df = submission_df.groupby("text_id")[TARGET_NAMES].agg("mean").sort_index().reset_index()
 
     # save results
-    submission_df.to_csv("submission.csv", index=False)
+    submission_df.to_csv(os.path.join(args.output_dir, "submission.csv"), index=False)
 
 
 if __name__ == "__main__":

@@ -18,11 +18,13 @@ MLFLOW_DIR = "../mlruns"
 
 ########################## source directory and experiment name ##########################
 SRC_DIR = "language_model"
-EXPERIMENT_NAME = "deberta-v3-base_custom_loss"
-OVERWRITE_PARAMS = [
-    {"loss.params.alpha": 1.0},
-    {"loss.params.alpha": 0.5},
-]
+EXPERIMENT_NAME = "deberta-v3-base_for_ensemble"
+
+# MODEL = ["microsoft/deberta-v3-base"]
+# POOLING = ["MeanPooling", "CLSPooling"]
+# BATCH_SIZE =
+
+OVERWRITE_PARAMS = [None]
 
 
 # SRC_DIR = "pretrain"
