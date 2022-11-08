@@ -8,7 +8,7 @@ UPLOAD = False
 DATASET_DIR = "../datasets"
 DATASET_NAME = "feedback3-deberta-v3-base"
 
-EXPERIMENT_ID = "16"
+EXPERIMENT_ID = "19"
 RUN_ID = "636425503d944baa8dbdea0716d462c4"
 
 

@@ -22,6 +22,7 @@ from abc import ABC, ABCMeta, abstractmethod
 import json
 import yaml
 
+from box import Box
 from omegaconf import OmegaConf
 
 from tqdm.auto import tqdm
@@ -90,8 +91,15 @@ def parse_args():
 # ====================================================
 # main
 # ====================================================
-def main():
-    args = parse_args()
+def main(args=None):
+    if args is None:
+        args = Box(
+            {
+                "input_dir": ".",
+                "output_dir": ".",
+                "work_dir": ".",
+            }
+        )
 
     cfg = OmegaConf.load(os.path.join(args.input_dir, "config.yaml"))
     model_path_list = joblib.load(os.path.join(args.input_dir, "model_path_list.pkl"))
@@ -218,4 +226,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(args)
