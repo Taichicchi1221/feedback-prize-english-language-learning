@@ -83,7 +83,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-dir", default=".")
     parser.add_argument("--output-dir", default=".")
-    parser.add_argument("--work_dir", default=".")
+    parser.add_argument("--work-dir", default=".")
 
     return parser.parse_args()
 
@@ -164,7 +164,7 @@ def main(args=None):
             cfg.globals.steps_per_epoch = calc_steps_per_epoch(
                 len_dataset=len(pseudo_labeling_train_df),
                 batch_size=cfg.dataloader.train.batch_size,
-                accumulate_grad_batches=cfg.trainer.pseudo_label_train.accumulate_grad_batches,
+                accumulate_grad_batches=cfg.trainer.pseudo_label_optimizer.accumulate_grad_batches,
             )
             cfg.globals.total_steps = cfg.globals.steps_per_epoch * cfg.globals.pseudo_label_epochs
 

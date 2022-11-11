@@ -8,7 +8,7 @@ import transformers
 ##
 from utils import *
 from loss import get_loss, get_metric, need_sigmoid, TARGET_MAX, TARGET_MIN
-from optimizer import get_optimizer, get_scheduler, AdversarialLearner, hook_sift_layer, AWP
+from optimizer import get_optimizer, get_scheduler, AWP
 
 
 # ====================================================
@@ -282,6 +282,7 @@ class EvalModel(pl.LightningModule):
         y_hat = self(batch)
         if self.need_sigmoid:
             y_hat = y_hat.sigmoid() * (TARGET_MAX - TARGET_MIN) + TARGET_MIN
+
         return y_hat.detach().cpu().float()
 
     def forward(self, x):
@@ -310,7 +311,6 @@ class Model(EvalModel):
         optimizer_cfg,
         scheduler_cfg,
         awp_cfg=None,
-        sift_cfg=None,
         pretrained=True,
     ):
         super().__init__(
@@ -329,16 +329,16 @@ class Model(EvalModel):
         if head_cfg.regressor.init:
             self._init_weights(self.regressor)
 
+        self.automatic_optimization = False
         self.optimizer_cfg = optimizer_cfg
         self.scheduler_cfg = scheduler_cfg
+        self.accumulate_grad_batches = optimizer_cfg.accumulate_grad_batches
+        self.gradient_clip_algorithm = optimizer_cfg.gradient_clip_algorithm
+        self.gradient_clip_val = optimizer_cfg.gradient_clip_val
 
         # awp
-        if awp_cfg is not None and awp_cfg.apply:
-            self.awp = AWP(**awp_cfg.params)
-
-        # sift
-        if sift_cfg is not None and sift_cfg.apply:
-            self.sift = AdversarialLearner(self, hook_sift_layer(self, hidden_size=self.encoder.config.hidden_size))
+        if awp_cfg is not None:
+            self.awp = AWP(**awp_cfg)
 
         self.criterion = get_loss(loss_cfg.type, loss_cfg.params)
 
@@ -418,7 +418,11 @@ class Model(EvalModel):
             # any weights of the layer requires grad?
             requires_grad = any(map(lambda x: x.requires_grad, layer.parameters()))
             if not requires_grad:
-                print("#", f"layer{num_layers - idx}: requires_grad: {requires_grad}")
+                if idx == num_layers:
+                    print("#", f"embeddings: requires_grad: {requires_grad}")
+                else:
+                    print("#", f"layer{num_layers - idx}: requires_grad: {requires_grad}")
+
                 continue
 
             if idx == num_layers:
@@ -488,17 +492,35 @@ class Model(EvalModel):
         self.encoder.encoder.layer[:num_freeze_layers].requires_grad_(False)
 
     def training_step(self, batch, batch_idx):
-        y = batch["label"]
+        optimizer = self.optimizers(use_pl_optimizer=True)
+        scheduler = self.lr_schedulers()
+
         y_hat = self(batch)
-        loss = self.criterion(y_hat, y)
+        loss = self.criterion(y_hat, batch["label"])
 
-        if hasattr(self, "awp"):
-            self.awp.attack_backward(self, batch, self.trainer.current_epoch)
+        # backward
+        self.manual_backward(loss)
 
-        if hasattr(self, "sift"):
-            loss = loss + self.sift.loss(y, logits_fn=lambda model, batch: model(batch), batch=batch)
+        # gradient clipping
+        if self.gradient_clip_algorithm == "norm":
+            torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=self.gradient_clip_val)
+        elif self.gradient_clip_algorithm == "raise":
+            torch.nn.utils.clip_grad_value_(self.parameters(), clip_value=self.gradient_clip_val)
 
-        return {"loss": loss, "y_hat": y_hat, "y": y}
+        # awp
+        if hasattr(self, "awp") and self.current_epoch >= self.awp.start_epoch:
+            adv_loss = self.awp.attack_backward(batch, self, optimizer)
+            self.manual_backward(adv_loss)
+            self.awp.restore(self)
+
+        # step
+        if (batch_idx + 1) % self.accumulate_grad_batches == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+            if scheduler is not None:
+                scheduler.step()
+
+        return {"loss": loss, "y_hat": y_hat.detach(), "y": batch["label"].detach()}
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         y = outputs["y"].detach()
@@ -511,11 +533,10 @@ class Model(EvalModel):
         return super().on_train_batch_end(outputs, batch, batch_idx)
 
     def validation_step(self, batch, batch_idx):
-        y = batch["label"]
         y_hat = self(batch)
-        loss = self.criterion(y_hat, y)
+        loss = self.criterion(y_hat, batch["label"])
 
-        return {"loss": loss, "y_hat": y_hat, "y": y}
+        return {"loss": loss, "y_hat": y_hat.detach(), "y": batch["label"].detach()}
 
     def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx) -> None:
         y = outputs["y"].detach()

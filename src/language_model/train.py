@@ -236,14 +236,13 @@ def main(cfg):
             optimizer_cfg=cfg.optimizer,
             scheduler_cfg=cfg.scheduler,
             awp_cfg=cfg.awp,
-            sift_cfg=cfg.sift,
             pretrained=True,
         )
 
         cfg.globals.steps_per_epoch = calc_steps_per_epoch(
             len_dataset=len(train),
             batch_size=cfg.dataloader.train.batch_size,
-            accumulate_grad_batches=cfg.trainer.train.accumulate_grad_batches,
+            accumulate_grad_batches=cfg.optimizer.accumulate_grad_batches,
         )
         cfg.globals.total_steps = cfg.globals.steps_per_epoch * cfg.globals.epochs
 
@@ -276,7 +275,7 @@ def main(cfg):
             lr_history=model.history["lr"],
             filename=f"plots/lr_scheduler_fold{fold}.png",
             steps_per_epoch=cfg.globals.steps_per_epoch,
-            accumulate_grad_batches=cfg.trainer.train.accumulate_grad_batches,
+            accumulate_grad_batches=cfg.optimizer.accumulate_grad_batches,
         )
 
         # oof
@@ -315,7 +314,7 @@ def main(cfg):
             cfg.globals.steps_per_epoch = calc_steps_per_epoch(
                 len_dataset=len(pseudo_labeling_train_df),
                 batch_size=cfg.dataloader.train.batch_size,
-                accumulate_grad_batches=cfg.trainer.pseudo_label_train.accumulate_grad_batches,
+                accumulate_grad_batches=cfg.pseudo_label_optimizer.accumulate_grad_batches,
             )
             cfg.globals.total_steps = cfg.globals.steps_per_epoch * cfg.globals.pseudo_label_epochs
 

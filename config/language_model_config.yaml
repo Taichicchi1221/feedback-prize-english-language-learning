@@ -43,9 +43,6 @@ trainer:
     devices: 1
     precision: 16
     strategy:
-    gradient_clip_algorithm: norm
-    gradient_clip_val: 
-    accumulate_grad_batches: 2
     amp_backend: native
     amp_level:
     val_check_interval: 0.2
@@ -60,9 +57,6 @@ trainer:
     devices: ${trainer.train.devices}
     precision: ${trainer.train.precision}
     strategy: ${trainer.train.strategy}
-    gradient_clip_algorithm: ${trainer.train.gradient_clip_algorithm}
-    gradient_clip_val: ${trainer.train.gradient_clip_val}
-    accumulate_grad_batches: ${trainer.train.accumulate_grad_batches}
     amp_backend: ${trainer.train.amp_backend}
     amp_level: ${trainer.train.amp_level}
     val_check_interval: 1
@@ -114,6 +108,9 @@ optimizer:
     head: 24.0e-05
   lr_decay_rate: 0.10
   weight_decay: 0.0
+  accumulate_grad_batches: 2
+  gradient_clip_algorithm: null
+  gradient_clip_val: 
   params:
     # momentum: 0.0
     # eps: 1.0e-06
@@ -145,6 +142,9 @@ pseudo_label_optimizer:
     head: 1.0e-05
   lr_decay_rate: ${optimizer.lr_decay_rate}
   weight_decay: ${optimizer.weight_decay}
+  accumulate_grad_batches: ${optimizer.accumulate_grad_batches}
+  gradient_clip_algorithm: ${optimizer.gradient_clip_algorithm}
+  gradient_clip_val: ${optimizer.gradient_clip_val}
   params:
     # momentum: ${optimizer.params.momentum}
     # eps: ${optimizer.params.eps}
@@ -156,14 +156,8 @@ pseudo_label_scheduler:
   params: null
 
 awp:
-  apply: False
-  params:
-    adv_param: "weight"
-    adv_lr: 1.0
-    adv_eps: 0.001
-    start_epoch: 0
-    adv_step: 1
-
-sift:
-  apply: False
-
+  adv_param: "weight"
+  adv_lr: 1.0
+  adv_eps: 0.001
+  start_epoch: 2
+  adv_step: 1

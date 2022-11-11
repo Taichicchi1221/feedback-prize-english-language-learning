@@ -18,72 +18,72 @@ MLFLOW_DIR = "../mlruns"
 
 ########################## source directory and experiment name ##########################
 SRC_DIR = "language_model"
-EXPERIMENT_NAME = "deberta-v3-base_for_ensemble"
+EXPERIMENT_NAME = "temp"
 
-OVERWRITE_PARAMS = [
-    {
-        "model.encoder.path": "microsoft/deberta-v3-base",
-        "model.encoder.num_freeze_layers": 0,
-        "model.head.pooling.type": "MeanPooling",
-        "loss.type": "MCRMSELoss",
-        "dataloader.train.batch_size": 16,
-        "dataloader.test.batch_size": 16,
-        "trainer.train.accumulate_grad_batches": 1,
-        "tokenizer.max_length.train": 512,
-        "tokenizer.max_length.test": 512,
-        "optimizer.lr.encoder": 24.0e-05,
-        "optimizer.lr.head": 24.0e-05,
-        "optimizer.lr_decay_rate": 0.1,
-        "sift.apply": True,
-    }
-]
-"""
 MODEL = ["microsoft/deberta-v3-base"]
-POOLING = ["MeanPooling", "CLSPooling"]
-LOSS = ["MCRMSELoss", "ScaledMCBCELoss"]
+POOLING = [
+    "CLSPooling",
+    # "MeanPooling",
+    # "AttentionPooling",
+]
+LOSS = ["MCRMSELoss"]
 TRAIN_BATCH_SIZE = [16]
 TEST_BATCH_SIZE = [16]
 ACCUMULATE_GRAD_BATCHES = [1]
 MAX_LENGTH = [512]
+NUM_REINIT_LAYERS = [1]
 NUM_FREEZE_LAYERS = [0]
+LR_LLRD = [
+    # (24.0e-05, 0.1),
+    (16.0e-05, 0.1),
+    # (8.0e-05, 0.25),
+    # (4.0e-05, 0.5),
+]
 
-LR = [24.0e-05, 16.0e-05, 8.0e-05, 4.0e-05]
-LLRD = [0.1, 0.1, 0.25, 0.5]
 
-OVERWRITE_PARAMS = sum(
-    [
-        [
-            {
-                "model.encoder.path": model,
-                "model.encoder.num_freeze_layers": num_freeze_layers,
-                "model.head.pooling.type": pooling,
-                "loss.type": loss,
-                "dataloader.train.batch_size": train_batch_size,
-                "dataloader.test.batch_size": test_batch_size,
-                "trainer.train.accumulate_grad_batches": accumulate_grad_batches,
-                "tokenizer.max_length.train": max_length,
-                "tokenizer.max_length.test": max_length,
-                "optimizer.lr.encoder": lr,
-                "optimizer.lr.head": lr,
-                "optimizer.lr_decay_rate": llrd,
-            }
-            for model, num_freeze_layers, pooling, loss, train_batch_size, test_batch_size, accumulate_grad_batches, max_length in product(
-                MODEL,
-                NUM_FREEZE_LAYERS,
-                POOLING,
-                LOSS,
-                TRAIN_BATCH_SIZE,
-                TEST_BATCH_SIZE,
-                ACCUMULATE_GRAD_BATCHES,
-                MAX_LENGTH,
-            )
-        ]
-        for lr, llrd in zip(LR, LLRD)
-    ],
-    [],
-)
+OVERWRITE_PARAMS = [
+    {
+        "model.encoder.path": model,
+        "model.encoder.num_freeze_layers": num_freeze_layers,
+        "model.encoder.num_reinit_layers": num_reinit_layers,
+        "model.head.pooling.type": pooling,
+        "loss.type": loss,
+        "dataloader.train.batch_size": train_batch_size,
+        "dataloader.test.batch_size": test_batch_size,
+        "optimizer.accumulate_grad_batches": accumulate_grad_batches,
+        "tokenizer.max_length.train": max_length,
+        "tokenizer.max_length.test": max_length,
+        "optimizer.lr.encoder": lr_llrd[0],
+        "optimizer.lr.head": lr_llrd[0],
+        "optimizer.lr_decay_rate": lr_llrd[1],
+        "globals.use_folds": "[0]",
+    }
+    for (
+        model,
+        num_freeze_layers,
+        num_reinit_layers,
+        pooling,
+        loss,
+        train_batch_size,
+        test_batch_size,
+        accumulate_grad_batches,
+        max_length,
+        lr_llrd,
+    ) in product(
+        MODEL,
+        NUM_FREEZE_LAYERS,
+        NUM_REINIT_LAYERS,
+        POOLING,
+        LOSS,
+        TRAIN_BATCH_SIZE,
+        TEST_BATCH_SIZE,
+        ACCUMULATE_GRAD_BATCHES,
+        MAX_LENGTH,
+        LR_LLRD,
+    )
+]
 
-"""
+
 # SRC_DIR = "pretrain"
 # EXPERIMENT_NAME = "pretrain"
 # OVERWRITE_PARAMS = [None]
