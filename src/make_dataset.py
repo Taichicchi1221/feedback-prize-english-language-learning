@@ -8,10 +8,10 @@ UPLOAD = True
 INIT = True
 
 DATASET_DIR = "../datasets"
-DATASET_NAME = "roberta-large-for-ensemble"
+DATASET_NAME = "deberta-v3-base-for-ensemble4"
 
-EXPERIMENT_ID = "22"
-RUN_ID = "275850ecae17426e8a61bf6173a94baa"
+EXPERIMENT_ID = "19"
+RUN_ID = "be5c33f74c4f40e384dd4a375a740afc"
 
 
 MLFLOW_DIR = f"../mlruns/{EXPERIMENT_ID}"

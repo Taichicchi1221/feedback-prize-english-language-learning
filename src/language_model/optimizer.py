@@ -71,11 +71,10 @@ class AWP:
 
     def attack_backward(self, batch, model, optimizer):
         self._save(model)
-        for _ in range(self.adv_step):
-            self._attack_step(model)
-            out = model(batch)
-            adv_loss = model.criterion(out, batch["label"])
-            optimizer.zero_grad()
+        self._attack_step(model)
+        out = model(batch)
+        adv_loss = model.criterion(out, batch["label"])
+        optimizer.zero_grad()
         return adv_loss
 
     def _attack_step(self, model):

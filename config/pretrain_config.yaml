@@ -2,9 +2,11 @@ hydra:
   run:
     dir: "."
 
+data_type: feedback3
+
 globals:
   seed: 42
-  debug: False
+  debug: true
 
 tokenizer:
   max_length: 512
@@ -13,8 +15,8 @@ tokenizer:
 
 model:
   path: "microsoft/deberta-v3-base"
-  freeze_embeddings: True
-  freeze_encoders: 6
+  freeze_embeddings: false
+  freeze_encoders: 0
   params:
     hidden_dropout: 0.1
     hidden_dropout_prob: 0.1

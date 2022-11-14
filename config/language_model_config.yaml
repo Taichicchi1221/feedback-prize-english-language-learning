@@ -10,7 +10,7 @@ globals:
   pseudo_label_epochs: 0
   steps_per_epoch: -1 # must be set in script
   total_steps: -1 # must be set in script
-  debug: False
+  debug: True
 
 tokenizer:
   max_length:
@@ -69,7 +69,7 @@ config:
 model:
   encoder:
     path: microsoft/deberta-v3-base
-    num_reinit_layers: 1
+    num_reinit_layers: 0
     num_freeze_layers: 0
     params:
       hidden_dropout: 0.0
@@ -83,7 +83,7 @@ model:
       init: True
       params:
         # num_hidden_layers: 4 # WeightedLayerPooling, CLSConcatPooling
-        # weights: [1.0, 0.8, 0.6, 0.4] # WeightedLayerPooling
+        # weights: null # WeightedLayerPooling
         # dropout: 0.0 # LSTMPooling, GRUPooling
     regressor:
       type: SimpleRegressor
@@ -104,13 +104,13 @@ metric:
 optimizer:
   type: AdamW # [SGD, Adam, AdamW, RAdam, AdaBelief]
   lr:
-    encoder: 24.0e-05
-    head: 24.0e-05
+    encoder: 16.0e-05
+    head: 16.0e-05
   lr_decay_rate: 0.10
   weight_decay: 0.0
-  accumulate_grad_batches: 2
+  accumulate_grad_batches: 1
   gradient_clip_algorithm: null
-  gradient_clip_val: 
+  gradient_clip_val: null
   params:
     # momentum: 0.0
     # eps: 1.0e-06
@@ -159,5 +159,5 @@ awp:
   adv_param: "weight"
   adv_lr: 1.0
   adv_eps: 0.001
-  start_epoch: 2
+  start_epoch: 3
   adv_step: 1

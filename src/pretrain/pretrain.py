@@ -21,6 +21,25 @@ def seed_everything(seed: int = 42, deterministic: bool = False):
     torch.backends.cudnn.deterministic = deterministic
 
 
+def prepare_data_feedback3(num_samples=None):
+    FEEDBACK3_DIR = "../input/feedback-prize-english-language-learning"
+
+    # feedback3
+    df3 = pd.read_csv(os.path.join(FEEDBACK3_DIR, "train.csv"))
+
+    data = {
+        "id": df3["text_id"].to_list(),
+        "text": df3["full_text"].to_list(),
+    }
+
+    # debug?
+    if num_samples:
+        data["id"] = data["id"][:1000]
+        data["text"] = data["text"][:1000]
+
+    return data
+
+
 def prepare_data(num_samples=None):
     FEEDBACK1_DIR = "../input/feedback-prize-2021"
     FEEDBACK2_DIR = "../input/feedback-prize-effectiveness"
@@ -114,7 +133,10 @@ def main(cfg):
 
     seed_everything(seed=cfg.globals.seed)
 
-    data = prepare_data(num_samples=num_samples)
+    if cfg.data_type == "feedback3":
+        data = prepare_data_feedback3(num_samples=num_samples)
+    elif cfg.data_type == "all":
+        data = prepare_data(num_samples=num_samples)
 
     # tokenizer, model
     if cfg.tokenizer.params is None:
@@ -135,20 +157,20 @@ def main(cfg):
     if cfg.model.freeze_embeddings:
         if "deberta" in cfg.model.path:
             model.deberta.embeddings.requires_grad_(False)
-        elif "bert" in cfg.model.path:
-            model.bert.embeddings.requires_grad_(False)
         elif "longformer" in cfg.model.path:
             model.longformer.embeddings.requires_grad_(False)
         elif "bigbird" in cfg.model.path:
             model.bert.embeddings.requires_grad_(False)
+        elif "bert" in cfg.model.path:
+            model.bert.embeddings.requires_grad_(False)
     if cfg.model.freeze_encoders:
         if "deberta" in cfg.model.path:
             model.deberta.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
-        elif "bert" in cfg.model.path:
-            model.bert.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
         elif "longformer" in cfg.model.path:
             model.longformer.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
         elif "bigbird" in cfg.model.path:
+            model.bert.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
+        elif "bert" in cfg.model.path:
             model.bert.encoder.layer[: cfg.model.freeze_encoders].requires_grad_(False)
 
     # dataset

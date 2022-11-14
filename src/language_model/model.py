@@ -262,22 +262,6 @@ class EvalModel(pl.LightningModule):
             **head_cfg.regressor.params,
         )
 
-    def extract_hidden_states_step(self, batch, batch_idx):
-        output = self.encoder(
-            batch["input_ids"],
-            batch["attention_mask"],
-            output_hidden_state=True,
-        )
-        return output["hidden_states"].detach().cpu().float()
-
-    def extract_last_hidden_states_step(self, batch, batch_idx):
-        output = self.encoder(
-            batch["input_ids"],
-            batch["attention_mask"],
-            output_hidden_state=True,
-        )
-        return output["last_hidden_state"].detach().cpu().float()
-
     def predict_step(self, batch, batch_idx):
         y_hat = self(batch)
         if self.need_sigmoid:
@@ -407,46 +391,93 @@ class Model(EvalModel):
 
         # encoder
         ### encoder
-        num_layers = self.config.num_hidden_layers
-        layers = [self.encoder.embeddings] + [l for l in self.encoder.encoder.layer]
-        layers.reverse()
+        if hasattr(self.encoder.encoder, "layer"):
+            lr = encoder_lr
+            num_layers = len(self.encoder.encoder.layer)
+            for idx, layer in enumerate(self.encoder.encoder.layer[::-1]):
+                # any weights of the layer requires grad?
+                requires_grad = any(map(lambda x: x.requires_grad, layer.parameters()))
+                if requires_grad:
+                    print("#", f"layer{num_layers - idx}: lr={lr:.8f}, weight_decay={weight_decay}, requires_grad: {requires_grad}")
 
-        lr = encoder_lr
-
-        for idx, layer in enumerate(layers):
-
-            # any weights of the layer requires grad?
-            requires_grad = any(map(lambda x: x.requires_grad, layer.parameters()))
-            if not requires_grad:
-                if idx == num_layers:
-                    print("#", f"embeddings: requires_grad: {requires_grad}")
+                    optimizer_parameters += [
+                        {
+                            "params": [p for n, p in layer.named_parameters() if not any(nd in n for nd in no_decay)],
+                            "lr": lr,
+                            "weight_decay": weight_decay,
+                        },
+                        {
+                            "params": [p for n, p in layer.named_parameters() if any(nd in n for nd in no_decay)],
+                            "lr": lr,
+                            "weight_decay": 0.0,
+                        },
+                    ]
+                    lr *= lr_decay_rate
                 else:
                     print("#", f"layer{num_layers - idx}: requires_grad: {requires_grad}")
+        elif hasattr(self.encoder.encoder, "blocks"):
+            for block_idx, block in enumerate(self.encoder.encoder.blocks):
+                num_layers = len(block)
+                lr = encoder_lr
+                for layer_idx, layer in enumerate(block):
+                    # any weights of the layer requires grad?
+                    requires_grad = any(map(lambda x: x.requires_grad, layer.parameters()))
+                    if requires_grad:
+                        print(
+                            "#",
+                            f"block{block_idx + 1},",
+                            f"layer{num_layers - layer_idx}:",
+                            f" lr={lr:.8f},",
+                            f"weight_decay={weight_decay},",
+                            f"requires_grad: {requires_grad}",
+                        )
 
-                continue
+                        optimizer_parameters += [
+                            {
+                                "params": [p for n, p in layer.named_parameters() if not any(nd in n for nd in no_decay)],
+                                "lr": lr,
+                                "weight_decay": weight_decay,
+                            },
+                            {
+                                "params": [p for n, p in layer.named_parameters() if any(nd in n for nd in no_decay)],
+                                "lr": lr,
+                                "weight_decay": 0.0,
+                            },
+                        ]
+                        lr *= lr_decay_rate
+                    else:
+                        print("#", f"layer{num_layers - idx}: requires_grad: {requires_grad}")
 
-            if idx == num_layers:
-                print("#", f"embeddings: lr={lr:.8f}, weight_decay={weight_decay}, requires_grad: {requires_grad}")
-            else:
-                print("#", f"layer{num_layers - idx}: lr={lr:.8f}, weight_decay={weight_decay}, requires_grad: {requires_grad}")
-
+        # embeddings
+        requires_grad = any(map(lambda x: x.requires_grad, self.encoder.embeddings.parameters()))
+        if requires_grad:
             optimizer_parameters += [
                 {
-                    "params": [p for n, p in layer.named_parameters() if not any(nd in n for nd in no_decay)],
-                    "lr": lr,
-                    "weight_decay": weight_decay,
-                },
-                {
-                    "params": [p for n, p in layer.named_parameters() if any(nd in n for nd in no_decay)],
+                    "params": [p for n, p in self.encoder.embeddings.named_parameters() if any(nd in n for nd in no_decay)],
                     "lr": lr,
                     "weight_decay": 0.0,
-                },
+                }
             ]
-            lr *= lr_decay_rate
+            print("#", f"embeddings: lr={lr:.8f}, weight_decay={weight_decay}, requires_grad: {requires_grad}")
+        else:
+            print("#", f"embeddings: requires_grad: {requires_grad}")
 
         print("#" * 50)
 
         return optimizer_parameters
+
+    def _init_module(self, module):
+        if isinstance(module, nn.Linear):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
 
     def _init_weights(self, x):
         if self.config.to_dict().get("initializer_range") is None:
@@ -468,19 +499,15 @@ class Model(EvalModel):
     def _reinit_encoder(self, num_reinit_layers):
         assert 0 < num_reinit_layers <= self.config.num_hidden_layers, f"num_reinit_layers must be 0 < x <= {self.config.num_hidden_layers}"
 
-        for layer in self.encoder.encoder.layer[-num_reinit_layers:]:
-            for module in layer.modules():
-                if isinstance(module, nn.Linear):
-                    module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-                    if module.bias is not None:
-                        module.bias.data.zero_()
-                elif isinstance(module, nn.Embedding):
-                    module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-                    if module.padding_idx is not None:
-                        module.weight.data[module.padding_idx].zero_()
-                elif isinstance(module, nn.LayerNorm):
-                    module.bias.data.zero_()
-                    module.weight.data.fill_(1.0)
+        if hasattr(self.encoder.encoder, "layer"):
+            for layer in self.encoder.encoder.layer[-num_reinit_layers:]:
+                for module in layer.modules():
+                    self._init_module(module)
+        elif hasattr(self.encoder.encoder, "blocks"):
+            for block in self.encoder.encoder.blocks:
+                for layer in block:
+                    for module in layer.modules():
+                        self._init_module(module)
 
     def _freeze_encoder(self, num_freeze_layers):
         assert 0 < num_freeze_layers <= self.config.num_hidden_layers, f"num_freeze_layers must be 0 < x <= {self.config.num_hidden_layers}"
@@ -489,7 +516,13 @@ class Model(EvalModel):
         self.encoder.embeddings.requires_grad_(False)
 
         # encoder
-        self.encoder.encoder.layer[:num_freeze_layers].requires_grad_(False)
+        if hasattr(self.encoder.encoder, "layer"):
+            self.encoder.encoder.layer[:num_freeze_layers].requires_grad_(False)
+        elif hasattr(self.encoder.encoder, "blocks"):
+            for block in self.encoder.encoder.blocks:
+                block[:num_freeze_layers].requires_grad_(False)
+        else:
+            raise ValueError()
 
     def training_step(self, batch, batch_idx):
         optimizer = self.optimizers(use_pl_optimizer=True)

@@ -18,70 +18,78 @@ MLFLOW_DIR = "../mlruns"
 
 ########################## source directory and experiment name ##########################
 SRC_DIR = "language_model"
-EXPERIMENT_NAME = "temp"
+EXPERIMENT_NAME = "deberta-v3-for_ensemble2"
 
-MODEL = ["microsoft/deberta-v3-base"]
-POOLING = [
-    "CLSPooling",
-    # "MeanPooling",
-    # "AttentionPooling",
-]
-LOSS = ["MCRMSELoss"]
-TRAIN_BATCH_SIZE = [16]
-TEST_BATCH_SIZE = [16]
-ACCUMULATE_GRAD_BATCHES = [1]
-MAX_LENGTH = [512]
-NUM_REINIT_LAYERS = [1]
-NUM_FREEZE_LAYERS = [0]
-LR_LLRD = [
-    # (24.0e-05, 0.1),
-    (16.0e-05, 0.1),
-    # (8.0e-05, 0.25),
-    # (4.0e-05, 0.5),
-]
+OVERWRITE_PARAMS = [None]
+
+# MODEL = ["microsoft/deberta-v3-base"]
+# POOLING = [
+#     # "CLSPooling",
+#     "MeanPooling",
+#     # "AttentionPooling",
+# ]
+# LOSS = ["MCRMSELoss"]
+# TRAIN_BATCH_SIZE = [16]
+# TEST_BATCH_SIZE = [16]
+# MAX_LENGTH = [512]
+# NUM_REINIT_LAYERS = [0]
+# NUM_FREEZE_LAYERS = [0]
+# LR_LLRD = [
+#     {"lr": 16.0e-05, "llrd": 0.15},
+#     {"lr": 16.0e-05, "llrd": 0.20},
+# ]
+# CLIP = [{"algorithm": "null", "val": "null"}]
+# USE_FOLDS = ["[0]"]
+# AWP = ["null"]
 
 
-OVERWRITE_PARAMS = [
-    {
-        "model.encoder.path": model,
-        "model.encoder.num_freeze_layers": num_freeze_layers,
-        "model.encoder.num_reinit_layers": num_reinit_layers,
-        "model.head.pooling.type": pooling,
-        "loss.type": loss,
-        "dataloader.train.batch_size": train_batch_size,
-        "dataloader.test.batch_size": test_batch_size,
-        "optimizer.accumulate_grad_batches": accumulate_grad_batches,
-        "tokenizer.max_length.train": max_length,
-        "tokenizer.max_length.test": max_length,
-        "optimizer.lr.encoder": lr_llrd[0],
-        "optimizer.lr.head": lr_llrd[0],
-        "optimizer.lr_decay_rate": lr_llrd[1],
-        "globals.use_folds": "[0]",
-    }
-    for (
-        model,
-        num_freeze_layers,
-        num_reinit_layers,
-        pooling,
-        loss,
-        train_batch_size,
-        test_batch_size,
-        accumulate_grad_batches,
-        max_length,
-        lr_llrd,
-    ) in product(
-        MODEL,
-        NUM_FREEZE_LAYERS,
-        NUM_REINIT_LAYERS,
-        POOLING,
-        LOSS,
-        TRAIN_BATCH_SIZE,
-        TEST_BATCH_SIZE,
-        ACCUMULATE_GRAD_BATCHES,
-        MAX_LENGTH,
-        LR_LLRD,
-    )
-]
+# OVERWRITE_PARAMS = [
+#     {
+#         "globals.use_folds": use_folds,
+#         "model.encoder.path": model,
+#         "model.encoder.num_freeze_layers": num_freeze_layers,
+#         "model.encoder.num_reinit_layers": num_reinit_layers,
+#         "model.head.pooling.type": pooling,
+#         "loss.type": loss,
+#         "dataloader.train.batch_size": train_batch_size,
+#         "dataloader.test.batch_size": test_batch_size,
+#         "tokenizer.max_length.train": max_length,
+#         "tokenizer.max_length.test": max_length,
+#         "optimizer.lr.encoder": lr_llrd["lr"],
+#         "optimizer.lr.head": lr_llrd["lr"],
+#         "optimizer.lr_decay_rate": lr_llrd["llrd"],
+#         "optimizer.gradient_clip_algorithm": clip["algorithm"],
+#         "optimizer.gradient_clip_val": clip["val"],
+#         "awp": awp,
+#     }
+#     for (
+#         use_folds,
+#         model,
+#         num_freeze_layers,
+#         num_reinit_layers,
+#         pooling,
+#         loss,
+#         train_batch_size,
+#         test_batch_size,
+#         max_length,
+#         lr_llrd,
+#         clip,
+#         awp,
+#     ) in product(
+#         USE_FOLDS,
+#         MODEL,
+#         NUM_FREEZE_LAYERS,
+#         NUM_REINIT_LAYERS,
+#         POOLING,
+#         LOSS,
+#         TRAIN_BATCH_SIZE,
+#         TEST_BATCH_SIZE,
+#         MAX_LENGTH,
+#         LR_LLRD,
+#         CLIP,
+#         AWP,
+#     )
+# ]
 
 
 # SRC_DIR = "pretrain"
