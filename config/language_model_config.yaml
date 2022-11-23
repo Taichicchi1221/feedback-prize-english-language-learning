@@ -10,7 +10,7 @@ globals:
   pseudo_label_epochs: 0
   steps_per_epoch: -1 # must be set in script
   total_steps: -1 # must be set in script
-  debug: True
+  debug: False
 
 tokenizer:
   max_length:
@@ -90,7 +90,7 @@ model:
       init: True
       params:
         dropout_rate: 0.0
-        # dropout_num: 5
+        # dropout_num: 10
 
 loss:
   type: MCRMSELoss # [MCRMSELoss, SmoothL1Loss, ScaledMCBCELoss]
@@ -102,7 +102,8 @@ metric:
     num_cols: 6
 
 optimizer:
-  type: AdamW # [SGD, Adam, AdamW, RAdam, AdaBelief]
+  type: AdamW # [SGD, Adam, AdamW, RAdam, MADGRAD]
+  pretrained_weight_decay: False
   lr:
     encoder: 16.0e-05
     head: 16.0e-05
@@ -112,9 +113,10 @@ optimizer:
   gradient_clip_algorithm: null
   gradient_clip_val: null
   params:
+    correct_bias: False # AdamW
     # momentum: 0.0
     # eps: 1.0e-06
-    # betas: [0.9, 0.999] # RAdam
+    # betas: [0.9, 0.999]
   
 scheduler:
   ### torch
@@ -155,9 +157,13 @@ pseudo_label_scheduler:
   interval: null
   params: null
 
+swa:
+  # swa_lrs: 0.01
+  # swa_epoch_start: 3
+
 awp:
-  adv_param: "weight"
-  adv_lr: 1.0
-  adv_eps: 0.001
-  start_epoch: 3
-  adv_step: 1
+  # adv_param: "weight"
+  # adv_lr: 1.0
+  # adv_eps: 0.001
+  # start_epoch: 3
+  # adv_step: 1

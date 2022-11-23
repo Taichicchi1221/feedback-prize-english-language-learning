@@ -90,7 +90,8 @@ def train_function(
     valid_dataloader_args,
     model,
     trainer_args,
-    checkpoint_name,
+    checkpoint_name=None,
+    swa_cfg=None,
 ):
     trace = Trace()
 
@@ -131,6 +132,7 @@ def train_function(
         valid_dataloader = None
 
     with trace.timer(f"trainer.fit"):
+        callbacks = []
         if checkpoint_name:
             checkpoint_callback = CheckPointCallback(
                 filename=checkpoint_name,
@@ -142,12 +144,15 @@ def train_function(
                 save_last=False,
                 save_weights_only=True,
             )
-        else:
-            checkpoint_callback = None
+            callbacks.append(checkpoint_callback)
+
+        if swa_cfg is not None:
+            swa_callback = pl.callbacks.StochasticWeightAveraging(**swa_cfg)
+            callbacks.append(swa_callback)
 
         trainer = pl.Trainer(
             **trainer_args,
-            callbacks=checkpoint_callback,
+            callbacks=callbacks,
             logger=None,
         )
         trainer.fit(
@@ -259,6 +264,7 @@ def main(cfg):
             valid_dataloader_args=cfg.dataloader.test,
             model=model,
             trainer_args=cfg.trainer.train,
+            swa_cfg=cfg.swa,
             checkpoint_name=CHECKPOINT_NAME,
         )
         model_path_list.append(os.path.basename(best_model_path))

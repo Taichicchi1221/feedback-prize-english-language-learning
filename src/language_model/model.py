@@ -346,6 +346,7 @@ class Model(EvalModel):
             ),
             self.optimizer_cfg.type,
             self.optimizer_cfg.params,
+            pretrained_weight_decay=self.optimizer_cfg.pretrained_weight_decay,
         )
 
         if self.scheduler_cfg.params is None:
@@ -374,20 +375,7 @@ class Model(EvalModel):
         print("#" * 50)
         print("#", f"layerwise optimization info")
 
-        # head
-        print("#", f"head: lr={head_lr:.8f}")
-        optimizer_parameters = [
-            {
-                "params": [p for n, p in self.regressor.named_parameters()],
-                "lr": head_lr,
-                "weight_decay": 0.0,
-            },
-            {
-                "params": [p for n, p in self.pooling.named_parameters()],
-                "lr": head_lr,
-                "weight_decay": 0.0,
-            },
-        ]
+        optimizer_parameters = []
 
         # encoder
         ### encoder
@@ -461,6 +449,21 @@ class Model(EvalModel):
             print("#", f"embeddings: lr={lr:.8f}, weight_decay={weight_decay}, requires_grad: {requires_grad}")
         else:
             print("#", f"embeddings: requires_grad: {requires_grad}")
+
+        # head
+        print("#", f"head: lr={head_lr:.8f}")
+        optimizer_parameters += [
+            {
+                "params": [p for n, p in self.regressor.named_parameters()],
+                "lr": head_lr,
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [p for n, p in self.pooling.named_parameters()],
+                "lr": head_lr,
+                "weight_decay": 0.0,
+            },
+        ]
 
         print("#" * 50)
 

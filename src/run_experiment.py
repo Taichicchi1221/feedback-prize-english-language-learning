@@ -18,10 +18,27 @@ MLFLOW_DIR = "../mlruns"
 
 ########################## source directory and experiment name ##########################
 SRC_DIR = "language_model"
-EXPERIMENT_NAME = "deberta-v3-for_ensemble2"
+EXPERIMENT_NAME = "deberta-v3-base_several_improvements"
 
-OVERWRITE_PARAMS = [None]
+LR_LLRD = [
+    {"lr": 1.0e-05, "llrd": 0.95},
+    {"lr": 2.0e-05, "llrd": 0.50},
+    {"lr": 4.0e-05, "llrd": 0.25},
+    {"lr": 8.0e-05, "llrd": 0.25},
+    {"lr": 16.0e-05, "llrd": 0.25},
+    {"lr": 16.0e-05, "llrd": 0.10},
+    {"lr": 24.0e-05, "llrd": 0.10},
+]
+OVERWRITE_PARAMS = [
+    {
+        "optimizer.lr.encoder": lr_llrd["lr"],
+        "optimizer.lr.head": lr_llrd["lr"],
+        "optimizer.lr_decay_rate": lr_llrd["llrd"],
+    }
+    for lr_llrd in LR_LLRD
+]
 
+# N_FOLD = [10]
 # MODEL = ["microsoft/deberta-v3-base"]
 # POOLING = [
 #     # "CLSPooling",
@@ -29,22 +46,22 @@ OVERWRITE_PARAMS = [None]
 #     # "AttentionPooling",
 # ]
 # LOSS = ["MCRMSELoss"]
-# TRAIN_BATCH_SIZE = [16]
-# TEST_BATCH_SIZE = [16]
-# MAX_LENGTH = [512]
+# TRAIN_BATCH_SIZE = [8]
+# TEST_BATCH_SIZE = [8]
+# MAX_LENGTH = [512, 640]
 # NUM_REINIT_LAYERS = [0]
-# NUM_FREEZE_LAYERS = [0]
+# NUM_FREEZE_LAYERS = [12]
 # LR_LLRD = [
-#     {"lr": 16.0e-05, "llrd": 0.15},
-#     {"lr": 16.0e-05, "llrd": 0.20},
+#     {"lr": 4.0e-05, "llrd": 0.25},
 # ]
 # CLIP = [{"algorithm": "null", "val": "null"}]
-# USE_FOLDS = ["[0]"]
+# USE_FOLDS = ["null"]
 # AWP = ["null"]
 
 
 # OVERWRITE_PARAMS = [
 #     {
+#         "globals.n_fold": n_fold,
 #         "globals.use_folds": use_folds,
 #         "model.encoder.path": model,
 #         "model.encoder.num_freeze_layers": num_freeze_layers,
@@ -60,9 +77,10 @@ OVERWRITE_PARAMS = [None]
 #         "optimizer.lr_decay_rate": lr_llrd["llrd"],
 #         "optimizer.gradient_clip_algorithm": clip["algorithm"],
 #         "optimizer.gradient_clip_val": clip["val"],
-#         "awp": awp,
+#         # "awp": awp,
 #     }
 #     for (
+#         n_fold,
 #         use_folds,
 #         model,
 #         num_freeze_layers,
@@ -76,6 +94,7 @@ OVERWRITE_PARAMS = [None]
 #         clip,
 #         awp,
 #     ) in product(
+#         N_FOLD,
 #         USE_FOLDS,
 #         MODEL,
 #         NUM_FREEZE_LAYERS,

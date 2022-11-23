@@ -7,11 +7,13 @@ import shutil
 UPLOAD = True
 INIT = True
 
-DATASET_DIR = "../datasets"
-DATASET_NAME = "deberta-v3-base-for-ensemble4"
+USERNAME = "hutch1221"
 
-EXPERIMENT_ID = "19"
-RUN_ID = "be5c33f74c4f40e384dd4a375a740afc"
+DATASET_DIR = "../datasets"
+DATASET_NAME = "deberta-v3-base-ensemble-10-1"
+
+EXPERIMENT_ID = "34"
+RUN_ID = "7669396d9dee4ea0adfd5469722e6140"
 
 
 MLFLOW_DIR = f"../mlruns/{EXPERIMENT_ID}"
@@ -32,7 +34,7 @@ shutil.copytree(
 # make dataset metadata
 METADATA = {
     "title": DATASET_NAME,
-    "id": "hutch1221/" + DATASET_NAME,
+    "id": USERNAME + "/" + DATASET_NAME,
     "licenses": [
         {
             "name": "CC0-1.0",

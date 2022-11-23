@@ -4,5 +4,6 @@ work
 work/*
 kaggle/*
 datasets
+pretrained_models
 kaggle.json
 __pycache__
