@@ -13,6 +13,7 @@ from contextlib import contextmanager
 import matplotlib.pyplot as plt
 
 import numpy as np
+import pandas as pd
 
 import torch
 import pytorch_lightning as pl
@@ -227,10 +228,12 @@ def plot_scatter(preds, target, filename, target_names):
 def prepare_fold(df, n_fold, target_names=None, seed=None):
     assert target_names is not None, "target_names must be set."
     shuffle = seed is not None
-    Fold = MultilabelStratifiedKFold(n_splits=n_fold, shuffle=shuffle, random_state=seed)
-    for n, (train_index, valid_index) in enumerate(Fold.split(df, df[target_names])):
-        df.loc[valid_index, "fold"] = int(n)
-    df["fold"] = df["fold"].astype(int)
+    kfold = MultilabelStratifiedKFold(n_splits=n_fold, shuffle=shuffle, random_state=seed)
+    folds = np.zeros((len(df),), dtype=np.int32)
+    y = pd.get_dummies(df[target_names], columns=target_names)
+    for n, (train_index, valid_index) in enumerate(kfold.split(df, y)):
+        folds[valid_index] = int(n)
+    df["fold"] = folds
 
     print("# folds")
     print(df.groupby("fold").size())

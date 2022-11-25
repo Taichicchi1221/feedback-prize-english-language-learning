@@ -162,8 +162,8 @@ swa:
   # swa_epoch_start: 3
 
 awp:
-  # adv_param: "weight"
-  # adv_lr: 1.0
-  # adv_eps: 0.001
-  # start_epoch: 3
-  # adv_step: 1
+  adv_param: "weight"
+  adv_lr: 1.0
+  adv_eps: 0.001
+  start_epoch: 3
+  adv_step: 1

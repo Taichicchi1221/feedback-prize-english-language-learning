@@ -18,97 +18,76 @@ MLFLOW_DIR = "../mlruns"
 
 ########################## source directory and experiment name ##########################
 SRC_DIR = "language_model"
-EXPERIMENT_NAME = "deberta-v3-base_several_improvements"
+EXPERIMENT_NAME = "deberta-v3-base_fold10_for_ensemble"
 
-LR_LLRD = [
-    {"lr": 1.0e-05, "llrd": 0.95},
-    {"lr": 2.0e-05, "llrd": 0.50},
-    {"lr": 4.0e-05, "llrd": 0.25},
-    {"lr": 8.0e-05, "llrd": 0.25},
-    {"lr": 16.0e-05, "llrd": 0.25},
-    {"lr": 16.0e-05, "llrd": 0.10},
-    {"lr": 24.0e-05, "llrd": 0.10},
+N_FOLD = [10]
+MODEL = ["microsoft/deberta-v3-base"]
+POOLING = [
+    # "CLSPooling",
+    "MeanPooling",
+    # "AttentionPooling",
 ]
+LOSS = ["MCRMSELoss"]
+TRAIN_BATCH_SIZE = [4]
+TEST_BATCH_SIZE = [4]
+MAX_LENGTH = [1536]
+NUM_REINIT_LAYERS = [0]
+NUM_FREEZE_LAYERS = [0]
+LR_LLRD = [
+    {"lr": 4.0e-05, "llrd": 0.10},
+    {"lr": 8.0e-05, "llrd": 0.10},
+]
+CLIP = [{"algorithm": "null", "val": "null"}]
+USE_FOLDS = ["null"]
+
+
 OVERWRITE_PARAMS = [
     {
+        "globals.n_fold": n_fold,
+        "globals.use_folds": use_folds,
+        "model.encoder.path": model,
+        "model.encoder.num_freeze_layers": num_freeze_layers,
+        "model.encoder.num_reinit_layers": num_reinit_layers,
+        "model.head.pooling.type": pooling,
+        "loss.type": loss,
+        "dataloader.train.batch_size": train_batch_size,
+        "dataloader.test.batch_size": test_batch_size,
+        "tokenizer.max_length.train": max_length,
+        "tokenizer.max_length.test": max_length,
         "optimizer.lr.encoder": lr_llrd["lr"],
         "optimizer.lr.head": lr_llrd["lr"],
         "optimizer.lr_decay_rate": lr_llrd["llrd"],
+        "optimizer.gradient_clip_algorithm": clip["algorithm"],
+        "optimizer.gradient_clip_val": clip["val"],
     }
-    for lr_llrd in LR_LLRD
+    for (
+        n_fold,
+        use_folds,
+        model,
+        num_freeze_layers,
+        num_reinit_layers,
+        pooling,
+        loss,
+        train_batch_size,
+        test_batch_size,
+        max_length,
+        lr_llrd,
+        clip,
+    ) in product(
+        N_FOLD,
+        USE_FOLDS,
+        MODEL,
+        NUM_FREEZE_LAYERS,
+        NUM_REINIT_LAYERS,
+        POOLING,
+        LOSS,
+        TRAIN_BATCH_SIZE,
+        TEST_BATCH_SIZE,
+        MAX_LENGTH,
+        LR_LLRD,
+        CLIP,
+    )
 ]
-
-# N_FOLD = [10]
-# MODEL = ["microsoft/deberta-v3-base"]
-# POOLING = [
-#     # "CLSPooling",
-#     "MeanPooling",
-#     # "AttentionPooling",
-# ]
-# LOSS = ["MCRMSELoss"]
-# TRAIN_BATCH_SIZE = [8]
-# TEST_BATCH_SIZE = [8]
-# MAX_LENGTH = [512, 640]
-# NUM_REINIT_LAYERS = [0]
-# NUM_FREEZE_LAYERS = [12]
-# LR_LLRD = [
-#     {"lr": 4.0e-05, "llrd": 0.25},
-# ]
-# CLIP = [{"algorithm": "null", "val": "null"}]
-# USE_FOLDS = ["null"]
-# AWP = ["null"]
-
-
-# OVERWRITE_PARAMS = [
-#     {
-#         "globals.n_fold": n_fold,
-#         "globals.use_folds": use_folds,
-#         "model.encoder.path": model,
-#         "model.encoder.num_freeze_layers": num_freeze_layers,
-#         "model.encoder.num_reinit_layers": num_reinit_layers,
-#         "model.head.pooling.type": pooling,
-#         "loss.type": loss,
-#         "dataloader.train.batch_size": train_batch_size,
-#         "dataloader.test.batch_size": test_batch_size,
-#         "tokenizer.max_length.train": max_length,
-#         "tokenizer.max_length.test": max_length,
-#         "optimizer.lr.encoder": lr_llrd["lr"],
-#         "optimizer.lr.head": lr_llrd["lr"],
-#         "optimizer.lr_decay_rate": lr_llrd["llrd"],
-#         "optimizer.gradient_clip_algorithm": clip["algorithm"],
-#         "optimizer.gradient_clip_val": clip["val"],
-#         # "awp": awp,
-#     }
-#     for (
-#         n_fold,
-#         use_folds,
-#         model,
-#         num_freeze_layers,
-#         num_reinit_layers,
-#         pooling,
-#         loss,
-#         train_batch_size,
-#         test_batch_size,
-#         max_length,
-#         lr_llrd,
-#         clip,
-#         awp,
-#     ) in product(
-#         N_FOLD,
-#         USE_FOLDS,
-#         MODEL,
-#         NUM_FREEZE_LAYERS,
-#         NUM_REINIT_LAYERS,
-#         POOLING,
-#         LOSS,
-#         TRAIN_BATCH_SIZE,
-#         TEST_BATCH_SIZE,
-#         MAX_LENGTH,
-#         LR_LLRD,
-#         CLIP,
-#         AWP,
-#     )
-# ]
 
 
 # SRC_DIR = "pretrain"
