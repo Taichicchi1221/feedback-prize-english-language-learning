@@ -10,10 +10,10 @@ INIT = True
 USERNAME = "hutch1221"
 
 DATASET_DIR = "../datasets"
-DATASET_NAME = "deberta-v3-base-ensemble-10-1"
+DATASET_NAME = "feedback3-longformer-base-attention-fold10"
 
-EXPERIMENT_ID = "34"
-RUN_ID = "7669396d9dee4ea0adfd5469722e6140"
+EXPERIMENT_ID = "48"
+RUN_ID = "307296e54a424c48810c61c6e32c8ad9"
 
 
 MLFLOW_DIR = f"../mlruns/{EXPERIMENT_ID}"
@@ -47,8 +47,15 @@ with open(os.path.join(DATASET_DIR, DATASET_NAME, "dataset-metadata.json"), "w")
 # kaggle api
 if UPLOAD:
     os.chdir(os.path.join(DATASET_DIR, DATASET_NAME))
-    subprocess.run(f"kaggle datasets metadata hutch1221/{DATASET_NAME}", shell=True)
     if INIT:
-        subprocess.run(f"kaggle datasets create -r zip", shell=True)
+        command = "kaggle datasets create -r zip"
+        print("###", command)
+        subprocess.run(command, shell=True)
     else:
-        subprocess.run(f"kaggle datasets version -r zip -m '{DATASET_NAME}'", shell=True)
+        command = f"kaggle datasets metadata {USERNAME}/{DATASET_NAME}"
+        print("###", command)
+        subprocess.run(command, shell=True)
+
+        command = f"kaggle datasets version -r zip -m '{DATASET_NAME}'"
+        print("###", command)
+        subprocess.run(command, shell=True)
